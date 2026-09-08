@@ -90,11 +90,30 @@ an actual Postgres instance — no mocked SQL. See
 [Local Postgres/Redis for development](#local-postgresredis-for-development)
 to set that up.
 
+## Solana connection
+
+`packages/solana` wraps `@solana/web3.js`:
+
+- `createConnection()` — the shared `Connection`, configured with both
+  `SOLANA_RPC_URL` and `SOLANA_WS_URL` so on-chain subscriptions
+  (`logsSubscribe`, `accountSubscribe`, `programSubscribe` — used by the
+  scanner in Phase 4) ride the same client.
+- `RpcHealthMonitor` — polls `getSlot()` on an interval and emits
+  `healthy` / `unhealthy` / `reconnected`, which is what will drive the
+  `RPC_ERROR` Telegram alert (Phase 11) and `system_events` logging —
+  `@solana/web3.js` reconnects its websocket internally, but silently, so
+  something has to surface that to the user.
+- `WalletAdapter` — the interface Phantom gets wired into in Phase 12
+  (browser-only; see the security note in the source file for why the
+  backend must never implement `signTransaction`/`sendTransaction`).
+- `ReadOnlyWalletReader` — the backend's *only* wallet capability: SOL and
+  SPL token balance lookups from a public key, no signing, no keys held.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
 - [x] Phase 2 — Database
-- [ ] Phase 3 — Solana connection
+- [x] Phase 3 — Solana connection
 - [ ] Phase 4 — Real-time token scanner
 - [ ] Phase 5 — Scoring Engine
 - [ ] Phase 6 — Paper Trading
