@@ -187,6 +187,43 @@ Tested with 17 unit tests (11 for `PaperExecutionEngine`, 6 for
 `PaperTradingService` against fakes) plus 1 end-to-end integration test
 against real Postgres (open → close → verify both rows and PnL).
 
+## Strategy Engine & Signal Engine
+
+`packages/core/src/strategy/` — pure, synchronous, fully tested:
+
+- **`matchesStrategyFilters`** — the Strategy Builder's discovery filters
+  (token age, liquidity, volume, market cap, buy/sell ratio, unique
+  buyers, holder concentration cap, creator holding cap). A filter the
+  strategy leaves unset is skipped; a filter the strategy *does* set is
+  failed by missing data, never passed by default.
+- **`evaluateSignal`** — the Signal Engine: `STRONG_BUY` / `BUY` / `WATCH` /
+  `WAIT` / `REJECT`, exactly per spec's worked example (opportunity/risk/
+  momentum/liquidity/buy-pressure thresholds), gated first by the
+  discovery filters above and by the `PENDING_METADATA` sentinel (→
+  `WAIT`, never a guess). **A `BUY`/`STRONG_BUY` signal is a candidate
+  only** — nothing here checks risk limits, balances, or open positions;
+  every candidate still has to clear the Risk Engine (Phase 8) before
+  anything executes.
+- **`evaluateHoldSignal`** — a coarse `SELL` early-warning for an open
+  position whose risk score has deteriorated well past the strategy's own
+  cap. This is not a substitute for the price-triggered TP/SL/trailing
+  engine (Phase 9).
+- **`rankCandidates`** — the Autonomous Engine's RANK step: orders
+  `BUY`/`STRONG_BUY` candidates (`STRONG_BUY` first, then by
+  `opportunityScore`, ties broken by lower `riskScore`). Pure ranking —
+  it does not decide whether the top candidate may actually be bought.
+
+**What's intentionally not built yet:** the full Autonomous Engine loop
+(SCAN → ANALYZE → RANK → WAIT/BUY/SELL, continuously tying the scanner,
+scoring, strategy, and execution together) is not wired up as a running
+service in this phase. Per spec, "the autonomous engine never bypasses the
+Risk Engine" — assembling that loop before the Risk Engine (Phase 8) exists
+to gate it would mean either leaving it unenforced or building something
+that looks wired but isn't actually safe. It's assembled in Phase 8 once
+the gatekeeper exists.
+
+23 unit tests (9 filters, 9 signal, 5 ranking) — all pure, no DB/network.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -195,7 +232,7 @@ against real Postgres (open → close → verify both rows and PnL).
 - [x] Phase 4 — Real-time token scanner
 - [x] Phase 5 — Scoring Engine
 - [x] Phase 6 — Paper Trading
-- [ ] Phase 7 — Strategy Engine
+- [x] Phase 7 — Strategy Engine
 - [ ] Phase 8 — Risk Engine
 - [ ] Phase 9 — TP / SL / Trailing Stop
 - [ ] Phase 10 — Dashboard

@@ -1,4 +1,4 @@
-import type { TokenSnapshot } from '@pump-scalper/shared';
+import type { StrategyConfig, TokenScores, TokenSnapshot } from '@pump-scalper/shared';
 
 export function baseSnapshot(overrides: Partial<TokenSnapshot> = {}): TokenSnapshot {
   return {
@@ -21,6 +21,62 @@ export function baseSnapshot(overrides: Partial<TokenSnapshot> = {}): TokenSnaps
     bondingCurveStatus: 'ACTIVE',
     graduationStatus: 'NOT_GRADUATED',
     observedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+export function baseStrategy(overrides: Partial<StrategyConfig> = {}): StrategyConfig {
+  return {
+    userId: '11111111-1111-1111-1111-111111111111',
+    name: 'Test Strategy',
+    enabled: true,
+    autonomous: false,
+    tokenAgeSeconds: { min: 0, max: 600 },
+    liquiditySol: { min: 2, max: null },
+    volumeSolMin: 1,
+    marketCapSol: { min: null, max: 200 },
+    buySellRatioMin: 1.2,
+    uniqueBuyersMin: 5,
+    holderConcentrationPercentMax: 50,
+    creatorHoldingPercentMax: 15,
+    opportunityScoreMin: 85,
+    riskScoreMax: 30,
+    momentumScoreMin: 70,
+    liquidityScoreMin: 60,
+    buyPressureScoreMin: 65,
+    scoreWeights: {
+      momentumWeight: 1,
+      liquidityWeight: 1,
+      volumeWeight: 1,
+      buyPressureWeight: 1,
+      holderWeight: 1,
+      creatorRiskWeight: 1,
+    },
+    positionSizeSol: 0.1,
+    stopLossPercent: 15,
+    stopLossMode: 'FIXED',
+    takeProfitLevels: [{ triggerPercent: 10, sellPercent: 50 }],
+    trailingStopPercent: 10,
+    maxHoldingTimeSeconds: 600,
+    maxPositions: 3,
+    maxTradesPerDay: 20,
+    maxDailyLossSol: 0.5,
+    maxSlippageBps: 500,
+    ...overrides,
+  };
+}
+
+export function baseScores(overrides: Partial<TokenScores> = {}): TokenScores {
+  return {
+    mint: 'Mint1111111111111111111111111111111111111',
+    opportunityScore: 90,
+    riskScore: 20,
+    momentumScore: 80,
+    liquidityScore: 75,
+    buyPressureScore: 70,
+    holderScore: 60,
+    creatorRiskScore: 10,
+    computedAt: new Date().toISOString(),
     ...overrides,
   };
 }
