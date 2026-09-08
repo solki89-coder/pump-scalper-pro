@@ -224,6 +224,46 @@ the gatekeeper exists.
 
 23 unit tests (9 filters, 9 signal, 5 ranking) — all pure, no DB/network.
 
+## Risk Engine & Kill Switch
+
+**The gatekeeper. Nothing bypasses it.** `checkTrade()`
+(`packages/core/src/risk/riskEngine.ts`) is a pure function checking every
+spec-required limit — `MAX_POSITION_SIZE`, `MAX_DAILY_LOSS`,
+`MAX_TOTAL_EXPOSURE`, `MAX_OPEN_POSITIONS`, `MAX_TRADES_PER_DAY`,
+`MAX_SLIPPAGE`, `MIN_SOL_BALANCE` — plus `TRADING_ALLOCATION_EXCEEDED`
+(separate Trading Wallet cap), `KILL_SWITCH_ACTIVE` and
+`LIVE_TRADING_DISABLED` (checked first, ahead of everything else), and the
+four `AUTONOMOUS_*` limits for autonomous trades specifically. It never
+short-circuits on the first failure — a rejected trade reports *every*
+reason it failed, not just one.
+
+`evaluateTrade()` (`apps/api/src/risk/riskGate.ts`) is the DB-wired version
+every real code path calls: it gathers live state (open positions,
+exposure, trades today, realized daily PnL, kill-switch state) and hands it
+to `checkTrade()`. Every rejection is persisted as a `risk_event` — the
+spec's audit-log requirement, not just an in-memory decision.
+
+**Kill Switch** (`apps/api/src/risk/killSwitch.ts`): flips `bot_state` to
+`KILL_SWITCH`, which `checkTrade()` rejects ahead of every other rule, and
+logs a `system_event`. It **never touches open positions** — closing them
+is always a separate, explicit action, exactly per spec. (The Telegram
+alert this is supposed to fire lands in Phase 11; the audit trail exists
+regardless.)
+
+**Autonomous Engine** (`apps/api/src/autonomous/autonomousEngine.ts`) —
+assembled now that the gatekeeper exists, closing the loop promised in
+Phase 7: SCAN (candidate tokens) → ANALYZE (score) → RANK → for each
+ranked candidate, `evaluateTrade()` → only on approval, `openPaperPosition()`.
+Two hard stops before any of that: kill switch active does nothing at all,
+and **LIVE mode also does nothing** — autonomous live trading needs the
+live execution engine (Phase 13), so this refuses outright rather than
+quietly trading paper under a "LIVE" label.
+
+45 tests: 19 for `checkTrade()`, 6 for `evaluateTrade()` (fakes), 7 for the
+autonomous engine (fakes), 2 kill-switch + 1 paper-trading end-to-end
+integration tests against real Postgres. **131 tests pass across the whole
+monorepo as of this phase.**
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -233,7 +273,7 @@ the gatekeeper exists.
 - [x] Phase 5 — Scoring Engine
 - [x] Phase 6 — Paper Trading
 - [x] Phase 7 — Strategy Engine
-- [ ] Phase 8 — Risk Engine
+- [x] Phase 8 — Risk Engine
 - [ ] Phase 9 — TP / SL / Trailing Stop
 - [ ] Phase 10 — Dashboard
 - [ ] Phase 11 — Telegram

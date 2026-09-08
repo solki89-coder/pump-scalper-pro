@@ -4,3 +4,4 @@ export * from './execution/paperExecutionEngine.js';
 export * from './strategy/filters.js';
 export * from './strategy/signal.js';
 export * from './strategy/ranking.js';
+export * from './risk/riskEngine.js';
