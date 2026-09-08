@@ -314,6 +314,50 @@ regardless, per spec's stop-loss requirement.
 `sellPartial`, 7 `monitorPositionTick`, on top of the existing paper
 trading tests) — **163 tests pass across the whole monorepo.**
 
+## Dashboard
+
+`apps/web` — Next.js (App Router) PWA, mobile-first, dark trading-terminal
+theme, talking to the Phase 10 backend over REST + one shared WebSocket.
+
+**Scope note:** built as a reduced dashboard by explicit choice during
+development, not the full 8-screen set (`/dashboard /scanner /positions
+/strategies /trades /analytics /risk /settings`) originally scoped. What
+exists: `/login` and one `/dashboard` screen carrying everything the spec's
+"MAIN DASHBOARD" section lists — Portfolio (SOL Balance, Daily PnL, Total
+PnL), Open Positions, Trades Today, Win Rate, Max Drawdown, Bot Status
+badge, Start/Stop/Paper/Live/Kill Switch controls, a live cumulative-PnL
+chart (Recharts), and the open-positions list — all updating in real time
+over WebSocket, not polling. The other seven screens (Scanner, Strategies
+builder, Trade History table, Risk config, Settings) are **not built** —
+their REST endpoints exist and are tested (see below), there's just no UI
+for them yet.
+
+- **shadcn/ui**: hand-authored `Button`/`Card`/`Badge` components in
+  shadcn's own visual language (Tailwind + `clsx`/`tailwind-merge`) — this
+  matches how shadcn/ui actually works (components are copied into the
+  project, not installed as a package), not a shortcut around it.
+- **Auth**: Bearer token in `localStorage`, not the API's httpOnly-cookie +
+  CSRF flow (which the backend supports and the login response still sets
+  up, for future clients). A JWT in `localStorage` is readable by any
+  script on the page — a real tradeoff, chosen to keep this reduced
+  frontend simple, and one Phase 14's security audit should revisit.
+- **PWA**: installable (`manifest.json`, mobile viewport, standalone
+  display) with a placeholder SVG icon. No service worker / offline
+  caching — a live trading dashboard showing stale cached data offline
+  would be actively misleading, so that was left out rather than faked.
+
+Verified in a real browser during development (Playwright, mobile
+viewport), not just built: login → dashboard → live WebSocket updates →
+Kill Switch button (with confirmation) flips the status badge in place →
+Live Mode button surfaces the backend's real 501 refusal. That pass also
+caught and fixed two real bugs no unit test had covered — cross-origin
+`fetch` needs `credentials: 'include'` to both send and store the login
+cookie the WebSocket handshake depends on, and a bodyless POST (Start/
+Stop/Kill Switch) was being sent with `Content-Type: application/json`
+and no body, which Fastify's default JSON parser rejects; the server's
+content-type parser was made lenient to accept `{}` for those instead of
+only patching the client.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -325,7 +369,7 @@ trading tests) — **163 tests pass across the whole monorepo.**
 - [x] Phase 7 — Strategy Engine
 - [x] Phase 8 — Risk Engine
 - [x] Phase 9 — TP / SL / Trailing Stop
-- [ ] Phase 10 — Dashboard
+- [x] Phase 10 — Dashboard (reduced scope — see above)
 - [ ] Phase 11 — Telegram
 - [ ] Phase 12 — Wallet Adapter
 - [ ] Phase 13 — Live Execution Adapter
@@ -363,6 +407,20 @@ npm run migrate --workspace apps/api
 
 npm run test --workspace apps/api   # runs against pump_scalper_test automatically
 ```
+
+### Running the API + Dashboard together
+
+```bash
+# Terminal 1 — API (set ADMIN_EMAIL/ADMIN_PASSWORD in .env first to seed a login)
+npm run dev --workspace apps/api        # http://localhost:4000
+
+# Terminal 2 — Dashboard
+NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev --workspace apps/web   # http://localhost:3000
+```
+Sign in at `/login` with the seeded `ADMIN_EMAIL`/`ADMIN_PASSWORD`. A brand
+new account has no risk configuration yet — `PUT /api/risk-config` (no UI
+for this yet, see the Dashboard scope note above) needs to be called at
+least once before a manual buy will pass the Risk Engine.
 
 ## License
 

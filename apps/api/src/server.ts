@@ -8,6 +8,7 @@ import analyticsRoutes from './routes/analytics.js';
 import authRoutes from './routes/auth.js';
 import botRoutes from './routes/bot.js';
 import healthRoutes from './routes/health.js';
+import portfolioRoutes from './routes/portfolio.js';
 import positionRoutes from './routes/positions.js';
 import riskRoutes from './routes/risk.js';
 import strategyRoutes from './routes/strategies.js';
@@ -21,6 +22,23 @@ export async function buildServer(): Promise<FastifyInstance> {
   const config = loadConfig();
   const fastify = Fastify({ logger: { level: config.LOG_LEVEL } });
 
+  // A bodyless action (POST /api/bot/start and friends) sent with
+  // Content-Type: application/json but zero bytes is reasonable client
+  // behavior, not a malformed request — treat it as `{}` instead of
+  // Fastify's default 400. Routes that need real fields still validate
+  // them via zod and reject a missing/invalid body themselves.
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (typeof body !== 'string' || body.length === 0) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   await fastify.register(securityPlugin);
   await fastify.register(authPlugin);
   await fastify.register(fastifyWebsocket);
@@ -28,6 +46,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(healthRoutes);
   await fastify.register(authRoutes);
   await fastify.register(botRoutes);
+  await fastify.register(portfolioRoutes);
   await fastify.register(positionRoutes);
   await fastify.register(strategyRoutes);
   await fastify.register(riskRoutes);
