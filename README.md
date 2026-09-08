@@ -791,10 +791,10 @@ cp .env.example .env
 # Fill in at minimum: SOLANA_RPC_URL, SOLANA_WS_URL, JWT_SECRET (32+ random
 # bytes — `openssl rand -hex 32`), ADMIN_EMAIL, ADMIN_PASSWORD. Leave
 # ENABLE_LIVE_TRADING=false until you've verified paper trading end to end.
-# Optionally set NEXT_PUBLIC_API_URL (defaults to http://localhost:4000 —
-# override it to your real host/domain if the dashboard will be reached
-# from anywhere other than the same machine) and CORS_ORIGIN if the
-# dashboard is served from a different origin than the API.
+# Optionally set NEXT_PUBLIC_API_URL (defaults to http://localhost:4000)
+# and CORS_ORIGIN (defaults to http://localhost:3000 — see the CORS note
+# below) if the dashboard will be reached from anywhere other than the
+# same machine.
 
 docker compose up -d --build
 
@@ -837,20 +837,32 @@ standalone's file-tracing resolves those correctly across npm workspace
 symlinks was out of scope for this pass — documented as a real
 optimization opportunity rather than silently left undone.
 
-**What was and wasn't verified**: `docker compose config` (the resolved
-config, env-var substitution included) was checked for correctness; the
-exact `COPY` set each Dockerfile uses was tested standalone with a real
-`npm ci` (confirms nothing needed is missing from the layer); `next build`
-and `next start` were run directly and confirmed working (the same
-commands the web image's build and `CMD` use); `npm run migrate` /
-`npm run start` for the API were exercised directly in earlier phases.
-What was **not** verified is a real end-to-end `docker compose up --build`
-of the full stack — this sandboxed environment's network policy blocks
-Docker Hub image pulls (`node:20-alpine`, `postgres:16-alpine`,
-`redis:7-alpine` all fail to pull here), the same kind of sandbox
-restriction that blocked live Solana RPC access in earlier phases. Run
-`docker compose up -d --build` yourself and watch `docker compose logs
--f` on first deploy before trusting it unattended.
+**What was and wasn't verified in the sandbox that built this**: `docker
+compose config` (the resolved config, env-var substitution included) was
+checked for correctness; the exact `COPY` set each Dockerfile uses was
+tested standalone with a real `npm ci`; `next build` and `next start` were
+run directly and confirmed working (the same commands the web image's
+build and `CMD` use). What could **not** be verified there is a real
+end-to-end `docker compose up --build` — that sandbox's network policy
+blocks Docker Hub image pulls entirely, the same kind of restriction that
+blocked live Solana RPC access in earlier phases.
+
+**It has since been run for real** (a user's own Mac, guided step by step)
+and it **found a genuine bug**: with `NODE_ENV=production` forced for the
+`api` container, the API's CORS plugin switches from "allow any origin"
+(the dev-mode default) to an explicit allow-list read from `CORS_ORIGIN`
+— and the dashboard (port 3000) and API (port 4000) are different
+*origins* to a browser even on `localhost`. With `CORS_ORIGIN` unset
+(empty), every dashboard→API request was silently blocked by the browser,
+and login just failed with no useful error message. Fixed by giving
+`docker-compose.yml`'s `api` service a sensible default —
+`CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:${WEB_PORT:-3000}}` — so
+the common single-host/localhost deployment this compose file is set up
+for works out of the box; override it in `.env` for a real domain. This
+is exactly the kind of bug a sandboxed build-time check can't catch (dev
+mode never exercises the production CORS path) and only a real deploy
+surfaces — which is why this got fixed the moment it was actually run,
+not left as a hidden trap for the next person following this README.
 
 ### VPS notes
 

@@ -50,6 +50,17 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-pump_scalper}:${POSTGRES_PASSWORD:-pump_scalper}@postgres:5432/${POSTGRES_DB:-pump_scalper}
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
+      # Forcing NODE_ENV=production here means the API's CORS plugin
+      # switches from "allow any origin" (dev convenience) to an
+      # explicit allow-list — and the dashboard (port 3000) and API
+      # (port 4000) are different origins to a browser even on the same
+      # host. Without this, login "fails" with no useful error (the
+      # browser silently blocks the response) — found and fixed via a
+      # real deploy, not caught in this sandbox where dev-mode CORS
+      # never surfaced it. Override in .env for a real domain
+      # deployment; this default covers the single-host/localhost case
+      # this compose file is set up for out of the box.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:${WEB_PORT:-3000}}
     ports:
       - '${API_PORT:-4000}:4000'
     depends_on:
