@@ -136,13 +136,36 @@ adapter, 8 for the DexScreener adapter, 5 for the TokenScanner
 orchestrator), so correctness doesn't depend on catching a real launch
 during a test run.
 
+## Scoring Engine
+
+`packages/core/src/scoring.ts` — pure, synchronous, fully unit-tested
+functions, no DB or network access. `scoreToken(snapshot, weights?,
+thresholds?)` returns all 7 spec scores (`opportunityScore`, `riskScore`,
+`momentumScore`, `liquidityScore`, `buyPressureScore`, `holderScore`,
+`creatorRiskScore`), each 0–100.
+
+Two things worth knowing before trusting these numbers:
+- **These are tunable heuristics, not ground truth.** Every threshold
+  (target liquidity, target volume, target holder count) lives in
+  `ScoringThresholds` and every sub-score's weight in the final
+  `opportunityScore` lives in `ScoreWeights` (`momentumWeight`,
+  `liquidityWeight`, `volumeWeight`, `buyPressureWeight`, `holderWeight`,
+  `creatorRiskWeight`) — both overridable, both meant to be tuned via the
+  Strategy Builder (Phase 7/10).
+- **Missing data is never scored as safe.** A single `TokenSnapshot` has no
+  price/volume history, so `momentumScore` approximates trend from current
+  activity discounted by token age; and every score that depends on a
+  `null` field (holder distribution, creator holding % — see the
+  data-source table above) resolves to a conservative, not neutral, value.
+  A token DexScreener hasn't indexed yet scores low, not lucky.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
 - [x] Phase 2 — Database
 - [x] Phase 3 — Solana connection
 - [x] Phase 4 — Real-time token scanner
-- [ ] Phase 5 — Scoring Engine
+- [x] Phase 5 — Scoring Engine
 - [ ] Phase 6 — Paper Trading
 - [ ] Phase 7 — Strategy Engine
 - [ ] Phase 8 — Risk Engine
