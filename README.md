@@ -401,6 +401,47 @@ unit-tested.
 plus the existing suites unaffected by the alert wiring since it's all
 optional/no-op by default). **208 tests pass across the whole monorepo.**
 
+## Wallet Adapter (Phantom)
+
+`apps/web/src/lib/wallet/` wires Solana's official `@solana/wallet-adapter-react`
+(+ `-react-ui`, `-phantom`) into the dashboard, implementing the
+`WalletAdapter` interface Phase 3 defined in `packages/solana` — the same
+interface a future non-web client could implement too.
+`WalletConnectButton` connects Phantom, reads the SOL balance directly
+from chain (read-only), and syncs only the **public** key to the backend
+(`POST /api/wallet/connect`) — never a private key or seed phrase, per
+`packages/solana/src/walletAdapter.ts`'s security rules. That's not a
+policy this code follows; it's structurally true, because
+`signTransaction`/`sendTransaction` delegate straight to the Phantom
+extension itself, which this app's code never has visibility into.
+
+A real bug turned up wiring this and testing it in an actual browser: the
+naive `select(walletName)` → `connect()` pattern races React's own state
+update and throws `WalletNotSelectedError`, because `connect()` runs
+before the just-selected wallet has landed in state. Fixed by connecting
+the specific adapter directly and reading its `publicKey` off the adapter
+instance (set synchronously by its own `connect()`) instead of the
+context's — sidesteps the render-timing gap entirely; `useWallet()`'s own
+`connected`/`publicKey` still update shortly after for the UI's re-render,
+via the adapter's `connect` event.
+
+Also required splitting `@pump-scalper/solana` into a browser-safe entry
+(`.`: connection, lamports, the wallet adapter interface, the read-only
+balance reader, the DexScreener adapter) and a server-only one (`./server`:
+`RpcHealthMonitor`, the pump.fun on-chain discovery adapter) — both use
+Node's `EventEmitter`, which a frontend bundle has no business pulling in
+(and webpack won't polyfill by default). `apps/api` imports from
+`@pump-scalper/solana/server` for those two; nothing else changed.
+
+**Verified in a real browser** (Playwright) without a Phantom extension
+installed (this sandbox has none) — the honest limit of what could be
+checked here: the button renders, clicking it fails gracefully with a
+visible "Failed to connect wallet" message instead of crashing the page or
+throwing to the console, which is exactly the code path that succeeds once
+a real Phantom extension is present. The actual approve-in-Phantom flow
+needs a real browser + extension to verify beyond that; do so before
+relying on this for anything Phase 13 wires up.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -414,6 +455,7 @@ optional/no-op by default). **208 tests pass across the whole monorepo.**
 - [x] Phase 9 — TP / SL / Trailing Stop
 - [x] Phase 10 — Dashboard (reduced scope — see above)
 - [x] Phase 11 — Telegram
+- [x] Phase 12 — Wallet Adapter
 - [ ] Phase 11 — Telegram
 - [ ] Phase 12 — Wallet Adapter
 - [ ] Phase 13 — Live Execution Adapter

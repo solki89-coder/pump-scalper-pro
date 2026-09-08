@@ -1,4 +1,5 @@
-import type { MarketData, TokenCreationEvent } from '@pump-scalper/solana';
+import type { MarketData } from '@pump-scalper/solana';
+import type { TokenCreationEvent } from '@pump-scalper/solana/server';
 import type { TokenSnapshot } from '@pump-scalper/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {

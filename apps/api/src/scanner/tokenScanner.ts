@@ -1,4 +1,5 @@
-import type { TokenCreationEvent, MarketData } from '@pump-scalper/solana';
+import type { MarketData } from '@pump-scalper/solana';
+import type { TokenCreationEvent } from '@pump-scalper/solana/server';
 import type { TokenSnapshot } from '@pump-scalper/shared';
 import { NoopTelegramAlerts, type TelegramAlertsPort } from '../telegram/alerts.js';
 

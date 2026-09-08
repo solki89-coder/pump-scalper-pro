@@ -1,4 +1,5 @@
-import { createConnection, RpcHealthMonitor } from '@pump-scalper/solana';
+import { createConnection } from '@pump-scalper/solana';
+import { RpcHealthMonitor } from '@pump-scalper/solana/server';
 import type { Connection } from '@solana/web3.js';
 import { loadConfig } from './config.js';
 

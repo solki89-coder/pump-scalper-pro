@@ -1,5 +1,5 @@
 import { PaperExecutionEngine } from '@pump-scalper/core';
-import { RpcHealthMonitor } from '@pump-scalper/solana';
+import { RpcHealthMonitor } from '@pump-scalper/solana/server';
 import { runAutonomousCycle, type AutonomousCyclePorts } from './autonomous/autonomousEngine.js';
 import { getOrCreateBotState } from './db/repositories/botState.js';
 import { listOpenPositions, updatePosition } from './db/repositories/positions.js';

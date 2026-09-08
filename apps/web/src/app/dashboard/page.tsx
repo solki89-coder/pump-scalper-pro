@@ -5,6 +5,7 @@ import { PnlChart } from '@/components/PnlChart';
 import { PositionCard } from '@/components/PositionCard';
 import { formatPercent, formatSol, StatCard } from '@/components/StatCard';
 import { Button, Card } from '@/components/ui';
+import { WalletConnectButton } from '@/components/WalletConnectButton';
 import { ApiError, apiFetch, clearToken, getToken } from '@/lib/api';
 import { useWsSubscription } from '@/lib/useWebSocket';
 import type { BotState, Position, PortfolioSummary, Trade } from '@pump-scalper/shared';
@@ -107,6 +108,10 @@ export default function DashboardPage() {
           Sign out
         </Button>
       </header>
+
+      <div className="mb-4">
+        <WalletConnectButton />
+      </div>
 
       {notice && (
         <Card className="mb-4 border-negative/40 bg-negative/10 text-sm text-negative">{notice}</Card>

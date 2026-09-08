@@ -1,4 +1,5 @@
-import { DexScreenerAdapter, PumpFunTokenDiscovery } from '@pump-scalper/solana';
+import { DexScreenerAdapter } from '@pump-scalper/solana';
+import { PumpFunTokenDiscovery } from '@pump-scalper/solana/server';
 import pino from 'pino';
 import { loadConfig } from '../config.js';
 import { getToken, upsertToken } from '../db/repositories/tokens.js';
