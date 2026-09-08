@@ -42,8 +42,15 @@ export class SolanaTransactionVerifier implements TransactionVerifier {
     });
     if (!tx || tx.meta?.err) return null;
 
-    const accountKeys = tx.transaction.message.accountKeys.map((k) => k.pubkey.toBase58());
-    const idx = accountKeys.indexOf(userPublicKey);
+    // Phase 14 security audit: matching on account *membership* alone
+    // (any account key referenced anywhere in the transaction — a pool
+    // authority, a program account, someone else's associated token
+    // account) would let a caller claim credit for a transaction they
+    // never authorized, by supplying a real signature/pubkey pair they
+    // merely observed on a public block explorer. Requiring `signer` here
+    // means the claimed public key actually co-signed this transaction —
+    // it paid for and authorized it, not just appeared in it.
+    const idx = tx.transaction.message.accountKeys.findIndex((k) => k.signer && k.pubkey.toBase58() === userPublicKey);
     if (idx === -1 || !tx.meta) return null;
 
     const solLamportsDelta = tx.meta.postBalances[idx]! - tx.meta.preBalances[idx]!;

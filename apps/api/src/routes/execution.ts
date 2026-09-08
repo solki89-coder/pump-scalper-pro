@@ -7,12 +7,30 @@ import { createPosition, getPosition, updatePosition } from '../db/repositories/
 import { getRiskConfig } from '../db/repositories/riskConfig.js';
 import { getToken } from '../db/repositories/tokens.js';
 import { createTrade } from '../db/repositories/trades.js';
+import { listWallets } from '../db/repositories/wallets.js';
 import { JupiterSwapAdapter, WRAPPED_SOL_MINT } from '../execution/jupiterSwapAdapter.js';
 import { LiveTradeRecorder, TransactionNotConfirmedError } from '../execution/liveTradeRecorder.js';
 import { getMintDecimals, SolanaTransactionVerifier } from '../execution/onChain.js';
 import { evaluateTrade } from '../risk/index.js';
 import { getConnection } from '../solana.js';
 import { getTelegramAlerts } from '../telegram/index.js';
+
+/**
+ * Phase 14 security audit: on-chain signer verification (see
+ * SolanaTransactionVerifier) proves a transaction was actually authorized
+ * by `userPublicKey` — but without this check, an authenticated caller
+ * could still name *any* real wallet's public key (public information —
+ * every Solana address and every transaction it ever signed is visible on
+ * any block explorer) as `userPublicKey` and have that stranger's
+ * genuine, unrelated swap recorded as their own trade. Requiring the key
+ * to be one this account actually connected via POST /api/wallet/connect
+ * ties the on-chain proof back to *this* account, not just to *some*
+ * real wallet.
+ */
+async function ownsConnectedWallet(userId: string, publicKey: string): Promise<boolean> {
+  const wallets = await listWallets(userId);
+  return wallets.some((w) => w.connected && w.publicKey === publicKey);
+}
 
 const PublicKeySchema = z.string().refine((v) => {
   try {
@@ -71,6 +89,10 @@ export default async function executionRoutes(fastify: FastifyInstance): Promise
     const parsed = QuoteRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const body = parsed.data;
+
+    if (!(await ownsConnectedWallet(request.userId, body.userPublicKey))) {
+      return reply.code(403).send({ error: 'That public key is not a wallet connected to your account. Connect it via POST /api/wallet/connect first.' });
+    }
 
     const riskConfig = await getRiskConfig(request.userId);
     if (!riskConfig) return reply.code(409).send({ error: 'No risk configuration set for this user yet.' });
@@ -132,6 +154,10 @@ export default async function executionRoutes(fastify: FastifyInstance): Promise
     const parsed = ConfirmRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid request', details: parsed.error.issues });
     const body = parsed.data;
+
+    if (!(await ownsConnectedWallet(request.userId, body.userPublicKey))) {
+      return reply.code(403).send({ error: 'That public key is not a wallet connected to your account. Connect it via POST /api/wallet/connect first.' });
+    }
 
     const recorder = new LiveTradeRecorder(
       new SolanaTransactionVerifier(getConnection()),

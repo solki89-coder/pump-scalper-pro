@@ -1,26 +1,25 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-const TOKEN_KEY = 'pump_scalper_token';
 
 /**
- * The dashboard uses Bearer-token auth (token kept in localStorage) rather
- * than the API's httpOnly-cookie + CSRF flow, to keep this reduced-scope
- * frontend simple. That's a real tradeoff — a token in localStorage is
- * readable by any script on the page (XSS risk) where an httpOnly cookie
- * isn't — documented here and in README.md rather than silently glossed
- * over. Phase 14's security audit is where the dashboard would move to the
- * cookie+CSRF flow the API already supports for exactly this reason.
+ * Phase 14 security audit: moved off Bearer-token-in-localStorage onto the
+ * API's httpOnly-cookie + CSRF flow (the API always supported both; the
+ * reduced-scope dashboard from Phase 10 took the simpler localStorage
+ * shortcut). The JWT itself now lives only in an httpOnly cookie the
+ * server sets on login — no client-side script, including an injected
+ * one, can read it. The `csrf_token` cookie the server sets alongside it
+ * is deliberately non-httpOnly (the whole point of the double-submit
+ * pattern is that JS must be able to read it and echo it back as a
+ * header); reading that cookie to log "am I authenticated" is not the
+ * same exposure as holding the actual bearer credential.
  */
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]!) : null;
 }
 
-export function setToken(token: string): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
+export function isAuthenticated(): boolean {
+  return readCookie('csrf_token') !== null;
 }
 
 export class ApiError extends Error {
@@ -33,15 +32,25 @@ export class ApiError extends Error {
   }
 }
 
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getToken();
   const headers = new Headers(init.headers);
   // Only set Content-Type when there's an actual body — Fastify's JSON
   // parser rejects a request that declares application/json but sends no
   // bytes (e.g. a bodyless POST like /api/bot/start), so a bodyless
   // action here must not send the header at all.
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // Double-submit CSRF: the server requires this header to match the
+  // csrf_token cookie on every cookie-authenticated mutating request (see
+  // apps/api/src/plugins/auth.ts). /auth/login itself is exempt (it's not
+  // authenticated yet), so there's no csrf_token cookie to send on that
+  // first request — the check below simply no-ops for it.
+  const method = (init.method ?? 'GET').toUpperCase();
+  if (MUTATING_METHODS.has(method)) {
+    const csrfToken = readCookie('csrf_token');
+    if (csrfToken) headers.set('x-csrf-token', csrfToken);
+  }
 
   // credentials: 'include' is required for a cross-origin request (web on
   // :3000, API on :4000 in dev) to both send AND store cookies — without
@@ -63,12 +72,12 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 }
 
 /**
- * The browser can't set an Authorization header on a WebSocket handshake,
- * so the WS connection authenticates via the httpOnly `token` cookie the
- * login route also sets (alongside the Bearer token this client actually
- * uses for REST calls) — the browser attaches it automatically because
- * `localhost:3000` and `localhost:4000` share the same registrable domain
- * (SameSite=Strict allows that; it isn't a cross-site request).
+ * The browser can't set a custom header on a WebSocket handshake, so the
+ * WS connection authenticates via the same httpOnly `token` cookie every
+ * REST call now also relies on — the browser attaches it automatically
+ * because `localhost:3000` and `localhost:4000` share the same
+ * registrable domain (SameSite=Strict allows that; it isn't a cross-site
+ * request).
  */
 export function wsUrl(): string {
   const url = new URL(API_BASE);

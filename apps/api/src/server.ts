@@ -1,6 +1,7 @@
 import fastifyWebsocket from '@fastify/websocket';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { fileURLToPath } from 'node:url';
+import { ZodError } from 'zod';
 import { loadConfig } from './config.js';
 import authPlugin from './plugins/auth.js';
 import securityPlugin from './plugins/security.js';
@@ -21,7 +22,18 @@ import registerWsHub from './ws/hub.js';
 /** Builds the app without starting it — the entry point tests use (fastify.inject(), no open port). */
 export async function buildServer(): Promise<FastifyInstance> {
   const config = loadConfig();
-  const fastify = Fastify({ logger: { level: config.LOG_LEVEL } });
+  // Fastify's default request/response log lines don't include headers or
+  // body already (just method/url/host/remoteAddress), so this redact
+  // list is defense-in-depth rather than a fix for an active leak — it
+  // keeps the JWT/session cookie and Authorization header out of logs
+  // even if something later logs a raw request/response object directly
+  // (a debug log, an error dump) instead of through Fastify's serializer.
+  const fastify = Fastify({
+    logger: {
+      level: config.LOG_LEVEL,
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],
+    },
+  });
 
   // A bodyless action (POST /api/bot/start and friends) sent with
   // Content-Type: application/json but zero bytes is reasonable client
@@ -38,6 +50,32 @@ export async function buildServer(): Promise<FastifyInstance> {
     } catch (err) {
       done(err as Error, undefined);
     }
+  });
+
+  // Phase 14 security audit: Fastify's built-in default error handler
+  // forwards a thrown error's own `.message` straight into the JSON
+  // response for ANY status code, including 500s — so an uncaught
+  // exception (a raw pg error, a bug in a repository query) would leak
+  // internal detail (table/column names, stack-adjacent context) to the
+  // client by default. Route-level validation errors that use
+  // `safeParse` and explicit `reply.code(4xx).send(...)` never reach
+  // this handler at all. A few route params/query schemas use zod's
+  // `.parse()` directly (throwing `ZodError` on bad input, e.g. an
+  // `:id` that isn't a UUID) instead of `safeParse` — that's genuinely
+  // a 400 (bad client input), not a 500, so it's special-cased here
+  // rather than falling through to "Internal server error."
+  fastify.setErrorHandler((error: FastifyError, request, reply) => {
+    if (error instanceof ZodError) {
+      reply.code(400).send({ error: 'Invalid request', details: error.issues });
+      return;
+    }
+    const statusCode = error.statusCode ?? 500;
+    if (statusCode >= 500) {
+      request.log.error({ err: error }, 'Unhandled error');
+      reply.code(statusCode).send({ error: 'Internal server error' });
+      return;
+    }
+    reply.code(statusCode).send({ error: error.message });
   });
 
   await fastify.register(securityPlugin);

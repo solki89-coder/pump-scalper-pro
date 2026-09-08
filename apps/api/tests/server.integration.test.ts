@@ -125,7 +125,7 @@ describe('bot control routes', () => {
     expect(res.json()).toMatchObject({ status: 'KILL_SWITCH', killSwitchActive: true });
   });
 
-  it('refuses to enable live trading — not implemented until Phase 13', async () => {
+  it('refuses to switch the autonomous bot into live mode — manual-only LIVE, by design', async () => {
     const { token } = await loginAndGetSession();
     const res = await app.inject({
       method: 'POST',
@@ -133,6 +133,20 @@ describe('bot control routes', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.statusCode).toBe(501);
+  });
+});
+
+describe('error handling', () => {
+  it('returns 400 with validation details for a malformed :id param instead of a raw 500', async () => {
+    const { token } = await loginAndGetSession();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/positions/not-a-uuid/close',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { maxSlippageBps: 100 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('Invalid request');
   });
 });
 

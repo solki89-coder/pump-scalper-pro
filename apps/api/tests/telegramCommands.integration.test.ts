@@ -48,7 +48,7 @@ describe('telegram commands', () => {
     await commands.tokens(null, reply);
     await commands.live(null, reply);
     expect(messages[0]).toContain('No tokens discovered');
-    expect(messages[1]).toContain('not implemented yet');
+    expect(messages[1]).toContain('not offered');
   });
 
   it('/status reports PAPER by default for a fresh operator', async () => {

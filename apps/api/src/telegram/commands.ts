@@ -64,7 +64,10 @@ export const commands = {
   },
 
   async live(_userId: string | null, reply: Reply): Promise<void> {
-    await reply('Live trading is not implemented yet. It ships in Phase 13 alongside the live execution engine.');
+    await reply(
+      'Autonomous live trading is not offered by this system (Phase 13 scope decision — manual-only). ' +
+        'Manual live trades require signing with your own wallet in the dashboard and cannot be placed from Telegram.',
+    );
   },
 
   async risk(userId: string | null, reply: Reply): Promise<void> {

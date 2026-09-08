@@ -499,6 +499,165 @@ sandboxed environment (mainnet RPC is blocked here, same as Phase 4/11's
 scanner) — verify with a real RPC endpoint, `ENABLE_LIVE_TRADING=true`,
 and a small real balance before trusting this with meaningful funds.
 
+## Security Audit (Phase 14)
+
+A pass over the whole system looking specifically for things that could go
+wrong with real money or real credentials, not new features. Every finding
+below was either fixed (and covered by a test where the fix is
+network-independent) or is listed as accepted with the reasoning for why.
+
+**Fixed:**
+
+- **Critical dependency vulnerability**: `@fastify/jwt@9.1.0` pulled in a
+  `fast-jwt` version with several published CVEs, including a JWT auth
+  bypass via an empty/weak HMAC secret
+  ([GHSA-gmvf-9v4p-v8jc](https://github.com/advisories/GHSA-gmvf-9v4p-v8jc)).
+  Upgraded to `@fastify/jwt@10.2.2` — `npm audit` on production
+  dependencies drops from 24 vulnerabilities (2 critical) to 22 (0
+  critical). Verified with the full test suite and a real login flow
+  after upgrading, not just a version bump.
+- **`JWT_SECRET` had no strength floor**: `min(1)` would let the server
+  boot with a one-character HMAC secret — trivially brute-forceable
+  offline. Raised to `min(32)` (matches the `.env.example` guidance,
+  which already said "32+ byte secret").
+- **Dashboard held its JWT in `localStorage`**: readable by any script on
+  the page (XSS risk), flagged explicitly by name in Phase 10/12's own
+  code comments as something for this phase to revisit. Moved the
+  dashboard onto the httpOnly-cookie + CSRF double-submit flow the API
+  always supported (`apps/web/src/lib/api.ts`, `login/page.tsx`,
+  `dashboard/page.tsx`) — the JWT itself never touches page JavaScript
+  now; only the non-httpOnly `csrf_token` cookie is read client-side,
+  which is the whole point of the double-submit pattern. Verified with a
+  real Playwright browser run: login → dashboard → a mutating action
+  (Start) succeeds with the CSRF header attached → session survives a
+  reload → Sign Out clears both cookies server-side → a direct nav to
+  `/dashboard` after sign-out bounces back to `/login`.
+- **No CORS allow-list in production**: `origin: false` in production
+  silently allowed *no* cross-origin browser requests but gave no way to
+  actually allow the real dashboard origin once deployed — the code
+  comment said "Phase 14 wires a real allow-list." Added `CORS_ORIGIN`
+  (comma-separated) to `config.ts`/`.env.example`; unset in production
+  still means same-origin-only, not "allow everything."
+- **No standard security headers**: added `@fastify/helmet` (defaults —
+  `X-Content-Type-Options`, `X-Frame-Options`, HSTS, a `script-src 'self'`
+  CSP, etc). Verified the headers actually appear on a real response and
+  that they don't block legitimate cross-origin dashboard→API fetches
+  (`Cross-Origin-Resource-Policy: same-origin` only restricts `no-cors`
+  loads, not the `cors`-mode `fetch()` calls this app makes — confirmed
+  in a real browser, not assumed).
+- **Uncaught errors leaked internal detail**: Fastify's built-in default
+  error handler forwards a thrown error's own `.message` into the JSON
+  response for *any* status code, including 500s — a raw Postgres error
+  or an internal bug would describe itself to the client. Added a global
+  `setErrorHandler` (`server.ts`) that logs full detail server-side but
+  returns a generic `"Internal server error"` for anything ≥500.
+  Discovered along the way: several routes validate `:id`/query params
+  with zod's `.parse()` (throws `ZodError`, uncaught) instead of
+  `safeParse` — those are genuine 400s (bad client input), not 500s, so
+  the handler special-cases `ZodError` into a proper 400 rather than
+  papering over the bug with a generic message. Covered by a new test
+  (malformed `:id` on `/api/positions/:id/close` now returns 400, not an
+  unhandled exception).
+- **Live execution trusted "this account key appeared in the
+  transaction" instead of "this account key signed it"**: every Solana
+  transaction and the public keys involved in it are public information
+  — findable on any block explorer. `SolanaTransactionVerifier.verifySwap`
+  matched `userPublicKey` against *any* account referenced by the
+  transaction (a pool authority, another wallet's token account),
+  not specifically a signer. Combined with nothing tying the claimed
+  `userPublicKey` to the authenticated account, this meant an
+  authenticated caller could name a stranger's real, unrelated,
+  already-public swap and have it recorded as their own trade. Fixed
+  two ways: (1) `verifySwap` now requires `signer: true` on the matched
+  account (`onChain.ts`) — the claimed key must have actually
+  authorized the transaction, not just appeared in it; (2)
+  `/api/execution/quote` and `/api/execution/confirm` now check the
+  claimed `userPublicKey` against wallets the authenticated account
+  actually connected via `POST /api/wallet/connect` (`ownsConnectedWallet`
+  in `execution.ts`), so the on-chain proof is tied back to *this*
+  account specifically. Both covered by new tests — a non-signer account
+  key is rejected (`onChain.test.ts`), and an unconnected public key is
+  refused before any network call (`execution.integration.test.ts`,
+  reachable with `ENABLE_LIVE_TRADING=true` and no live RPC, since the
+  ownership check runs before the Jupiter/RPC calls).
+- **Stale copy from before Phase 13 landed**: the dashboard's "Live Mode"
+  button and the Telegram `/live` command both still said "not
+  implemented yet, ships in Phase 13" — inaccurate once Phase 13 shipped
+  as manual-only. Both now correctly describe the actual, permanent
+  scope decision (autonomous LIVE is not offered; manual LIVE goes
+  through the wallet-signed execution flow, not the bot's mode switch or
+  Telegram).
+- **No log redaction**: Fastify's default request/response log lines
+  don't include headers or body already (confirmed by reading actual dev
+  server output — just method/url/host/remoteAddress), so this wasn't an
+  active leak, but added an explicit `redact` list for the
+  Authorization/cookie/set-cookie headers anyway as defense-in-depth
+  against a future direct log of a raw request/response object.
+
+**Reviewed and found sound (no change needed):**
+
+- **SQL injection**: every repository query uses parameterized queries
+  (`$1`, `$2`, ...); grepped the whole `db/repositories/` tree for
+  template-literal interpolation of a value into a query string —
+  none found.
+- **Route ownership scoping**: every authenticated route that touches a
+  user-owned resource (positions, strategies, wallet, trades) scopes by
+  `request.userId` from the verified JWT, never a client-supplied id, and
+  update/delete paths explicitly re-check `resource.userId ===
+  request.userId` before acting (returns 404, not 403, so existence isn't
+  leaked either) — this was already the pattern going in; audited it
+  route-by-route rather than assuming it held everywhere.
+- **Telegram bot authorization**: every command is gated behind a
+  chat-id check in middleware, before any command handler runs — the bot
+  token alone (which could leak) isn't sufficient to control trading.
+  Already built this way in Phase 11; re-verified here.
+- **WebSocket broadcasts to every connected socket with no per-user
+  filtering**: by design, not an oversight — this is a single-operator
+  system (see `auth/bootstrap.ts`; the `users` table exists for
+  multi-device login by the one operator, not multi-tenancy, and there's
+  no signup route). Every authenticated socket belongs to the same
+  person, potentially on multiple devices, so broadcasting portfolio/
+  position/trade updates to all of them is correct. This would need
+  revisiting before ever supporting more than one real operator account.
+- **Password hashing**: bcrypt at 12 salt rounds — reasonable for this
+  scale, no change made.
+- **Private key handling**: grepped the whole codebase for
+  `privateKey`/`secretKey`/`seedPhrase`/`mnemonic` — zero matches. The
+  wallet integration is read-only-public-key plus browser-side signing
+  (Phantom) by construction; there's nothing to leak because the server
+  never receives it in the first place.
+
+**Accepted, not fixed (with reasoning):**
+
+- **`vitest@2.1.9`'s own dependency chain carries a critical advisory**
+  (arbitrary file read via the Vitest UI server —
+  [GHSA-5xrq-8626-4rwp](https://github.com/advisories/GHSA-5xrq-8626-4rwp)).
+  This is a *dev-only* tool vulnerability, exploitable only when Vitest's
+  `--ui` server is actively running; grepped every `package.json` script
+  in the monorepo — `--ui` is never used. The fix is `vitest@5`, a major
+  version bump across every workspace's test suite (231 tests); given the
+  vulnerability requires a mode this project never enables, upgrading
+  wasn't worth the regression risk it would introduce right before a
+  security-focused phase. Worth revisiting on its own, deliberately, not
+  as a drive-by version bump here.
+- **Remaining production `npm audit` findings (22, down from 24)**: all
+  come from `@solana/web3.js`'s own dependency chain (`jayson` →
+  `stream-json`/`uuid`, both DoS-class, no fix published yet) or from
+  `next`'s bundled `postcss` (fix requires `next@16`, a breaking Next.js
+  major version). These are upstream issues in actively-maintained
+  ecosystem packages this project depends on directly for core
+  functionality (Solana RPC client, the web framework) — not something
+  fixable by a local code change, and not worth a risky framework major
+  bump as a side effect of a security-audit phase. Tracked here so
+  they're not silently forgotten; re-run `npm audit --omit=dev`
+  periodically and take the fix once one exists upstream.
+
+**Verification**: full monorepo — 235 tests passing (up from 230 before
+this phase), typecheck clean across all five workspaces, and the
+cookie+CSRF dashboard migration verified end-to-end in a real Playwright
+browser session (not just unit tests), the same standard every prior
+frontend-touching phase in this project was held to.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -514,10 +673,7 @@ and a small real balance before trusting this with meaningful funds.
 - [x] Phase 11 — Telegram
 - [x] Phase 12 — Wallet Adapter
 - [x] Phase 13 — Live Execution Adapter (manual-only — see above)
-- [ ] Phase 11 — Telegram
-- [ ] Phase 12 — Wallet Adapter
-- [ ] Phase 13 — Live Execution Adapter
-- [ ] Phase 14 — Security Audit
+- [x] Phase 14 — Security Audit (see above)
 - [ ] Phase 15 — Production Deployment
 
 ## Getting started (current state)

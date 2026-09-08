@@ -28,15 +28,16 @@ export default async function botRoutes(fastify: FastifyInstance): Promise<void>
     return state;
   });
 
-  // Deliberately refuses right now, independent of ENABLE_LIVE_TRADING: no
-  // LiveTradingService exists yet (ships in Phase 13). Letting the bot's
-  // mode flip to LIVE today, with the Risk Engine set up to allow it but
-  // nothing actually implementing live execution, would be presenting an
-  // unfinished feature as if it worked — exactly what the project rules
-  // say not to do.
+  // Deliberately refuses permanently, independent of ENABLE_LIVE_TRADING:
+  // this switches the *autonomous* engine's mode, and Phase 13's scope
+  // decision was manual-only LIVE trading via Phantom — no autonomous
+  // LIVE trading, ever, because that would require the server to hold a
+  // signing key. Manual LIVE trades go through POST /api/execution/quote
+  // + /confirm instead, signed client-side by the user's own wallet.
   fastify.post('/api/bot/mode/live', { preHandler: fastify.authenticate }, async (_request, reply) => {
     return reply.code(501).send({
-      error: 'Live trading is not implemented yet. It ships in Phase 13 alongside the live execution engine.',
+      error:
+        'Autonomous live trading is not offered by this system. Manual live trades are placed through the wallet-signed execution flow (POST /api/execution/quote + /confirm), not by switching the bot mode.',
     });
   });
 

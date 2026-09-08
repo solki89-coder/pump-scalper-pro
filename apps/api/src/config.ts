@@ -48,9 +48,23 @@ const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
 
-  JWT_SECRET: z.string().min(1),
+  // Phase 14 security audit: fast-jwt's own advisories include a JWT auth
+  // bypass via an empty/weak HMAC secret. A `min(1)` here would let
+  // someone start the server with a one-character secret that's
+  // brute-forceable in seconds; 32 chars of entropy (e.g. `openssl rand
+  // -hex 32`, which is 64 hex chars) is the floor for an HMAC secret
+  // that's actually resistant to offline guessing.
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters — generate one with `openssl rand -hex 32`'),
   ADMIN_EMAIL: z.string().default(''),
   ADMIN_PASSWORD: z.string().default(''),
+
+  // Comma-separated list of allowed origins for browser requests (e.g.
+  // "https://scalper.example.com"). Empty/unset in production means the
+  // API accepts no cross-origin browser requests at all (same-origin
+  // only) rather than silently allowing everything — set this explicitly
+  // once the dashboard is deployed on its own origin. Ignored outside
+  // production, where CORS stays wide open for local dev convenience.
+  CORS_ORIGIN: z.string().default(''),
 
   ENABLE_LIVE_TRADING: boolFromString,
 

@@ -6,7 +6,7 @@ import { PositionCard } from '@/components/PositionCard';
 import { formatPercent, formatSol, StatCard } from '@/components/StatCard';
 import { Button, Card } from '@/components/ui';
 import { WalletConnectButton } from '@/components/WalletConnectButton';
-import { ApiError, apiFetch, clearToken, getToken } from '@/lib/api';
+import { ApiError, apiFetch, isAuthenticated } from '@/lib/api';
 import { useWsSubscription } from '@/lib/useWebSocket';
 import type { BotState, Position, PortfolioSummary, Trade } from '@pump-scalper/shared';
 import { useRouter } from 'next/navigation';
@@ -35,13 +35,12 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!getToken()) {
+    if (!isAuthenticated()) {
       router.push('/login');
       return;
     }
     refresh().catch((err) => {
       if (err instanceof ApiError && err.status === 401) {
-        clearToken();
         router.push('/login');
       }
     });
@@ -101,8 +100,12 @@ export default function DashboardPage() {
         <Button
           variant="ghost"
           onClick={() => {
-            clearToken();
-            router.push('/login');
+            // Client JS cannot clear an httpOnly cookie itself — the
+            // server's /auth/logout does that. Navigate regardless of
+            // whether the call succeeds; a stale cookie with no valid
+            // session is harmless, but a user stuck on a page that
+            // silently failed to sign them out is not.
+            void apiFetch('/auth/logout', { method: 'POST' }).finally(() => router.push('/login'));
           }}
         >
           Sign out
@@ -131,9 +134,9 @@ export default function DashboardPage() {
           variant="outline"
           disabled={busy}
           onClick={() => void runAction(() => apiFetch('/api/bot/mode/live', { method: 'POST' }))}
-          title="Live trading ships in a later phase alongside the live execution engine"
+          title="Autonomous live trading is not offered. Manual live trades (wallet-signed via Phantom) are a separate flow, not built into this reduced dashboard yet."
         >
-          Live Mode
+          Autonomous Live (disabled)
         </Button>
         <Button variant="destructive" disabled={busy} onClick={onKillSwitch} className="ml-auto">
           Kill Switch

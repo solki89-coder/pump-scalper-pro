@@ -27,7 +27,7 @@ describe('SolanaTransactionVerifier.verifySwap', () => {
       slot: 100,
       blockTime: 1_700_000_000,
       transaction: {
-        message: { accountKeys: [{ pubkey: userPubkey }] },
+        message: { accountKeys: [{ pubkey: userPubkey, signer: true, writable: true }] },
         signatures: ['sig1'],
       },
       meta: {
@@ -74,6 +74,26 @@ describe('SolanaTransactionVerifier.verifySwap', () => {
     const verifier = new SolanaTransactionVerifier(connection);
     const someoneElse = Keypair.generate().publicKey.toBase58();
     expect(await verifier.verifySwap('sig1', someoneElse, MINT)).toBeNull();
+  });
+
+  it('returns null when the given public key appears in the transaction but did not sign it — closes the "claim a stranger\'s public tx" gap', async () => {
+    const bystander = Keypair.generate().publicKey;
+    const tx = fakeTx({
+      transaction: {
+        message: {
+          accountKeys: [
+            { pubkey: userPubkey, signer: true, writable: true },
+            { pubkey: bystander, signer: false, writable: true },
+          ],
+        },
+        signatures: ['sig1'],
+      },
+    } as unknown as Partial<ParsedTransactionWithMeta>);
+    const connection = { getParsedTransaction: vi.fn().mockResolvedValue(tx) } as unknown as Connection;
+    const verifier = new SolanaTransactionVerifier(connection);
+    // bystander is a real account referenced by this (someone else's) transaction, but
+    // never signed it — a caller cannot claim credit for it just by naming that pubkey.
+    expect(await verifier.verifySwap('sig1', bystander.toBase58(), MINT)).toBeNull();
   });
 
   it('computes a negative token delta for a sell (token balance decreasing)', async () => {

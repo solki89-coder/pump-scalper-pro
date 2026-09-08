@@ -1,7 +1,7 @@
 'use client';
 
 import { Button, Card } from '@/components/ui';
-import { apiFetch, setToken, ApiError } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
@@ -17,11 +17,14 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await apiFetch<{ token: string }>('/auth/login', {
+      // The login response body still carries the JWT for API clients
+      // that use it directly, but the dashboard now relies solely on the
+      // httpOnly cookie the server sets alongside it — nothing from this
+      // response needs to be stored client-side.
+      await apiFetch('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      setToken(res.token);
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed');
