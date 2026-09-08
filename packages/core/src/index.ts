@@ -5,3 +5,5 @@ export * from './strategy/filters.js';
 export * from './strategy/signal.js';
 export * from './strategy/ranking.js';
 export * from './risk/riskEngine.js';
+export * from './positions/positionEvaluator.js';
+export * from './positions/positionManager.js';

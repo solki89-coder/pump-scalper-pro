@@ -264,6 +264,56 @@ autonomous engine (fakes), 2 kill-switch + 1 paper-trading end-to-end
 integration tests against real Postgres. **131 tests pass across the whole
 monorepo as of this phase.**
 
+## TP / SL / Trailing Stop & Position Manager
+
+`packages/core/src/positions/` — pure, fully tested:
+
+- **`evaluatePositionExit`** — the one decision function the runtime calls
+  on every price tick, checked in this exact priority order: `STOP_LOSS` →
+  `TRAILING_STOP` (only once armed — i.e. `highestPrice` has actually moved
+  above entry) → `TAKE_PROFIT` (the lowest-index unexecuted level whose
+  target is reached; a price spike that jumps two levels still triggers
+  them one per subsequent tick, never both at once) → `MAX_HOLDING_TIME`.
+- **`recalculateStopLossPrice`** — `FIXED` never moves from entry;
+  `DYNAMIC` ratchets up with the position's highest price and never loosens
+  back down. The spec names both modes without defining DYNAMIC's exact
+  formula — this is this project's documented interpretation, not a
+  claimed industry standard.
+- **`computeTrailingStopPrice`** — `highestPrice - trailingPercentage`,
+  exactly per spec.
+- **`computePositionPriceUpdate`** — the Position Manager's real-time
+  recompute: `highestPrice` ratchet, `currentValueSol`/`unrealizedPnlSol`/
+  `unrealizedPnlPercent`, and both the stop-loss and trailing-stop prices,
+  from a single new price tick.
+
+**Multi-level take-profit** required a schema change: `takeProfitLevels`'
+`sellPercent` values are always relative to the position's *original*
+quantity (spec's TP1/TP2/TP3 example sums to ≤100%), not the shrinking
+remaining quantity after earlier partial sells — so `Position` now tracks
+`originalQuantity` (fixed at entry) separately from `quantity` (remaining,
+unsold). `PaperTradingService.sellPartial()` (`apps/api/src/trading/`)
+executes and persists exactly that: sells the requested amount (capped at
+what's actually remaining), marks the triggered level executed, and closes
+the position outright once nothing is left — all through the same
+execution engine and `positions`/`trades` repositories as a full close.
+
+`monitorPositionTick` (`apps/api/src/trading/positionMonitor.ts`) is the
+runtime glue: persist the price update → `evaluatePositionExit` → on a
+trigger, `sellPartial` (take-profit) or `closePosition` (everything else)
+via the new `TradingService` interface (`PaperTradingService` implements
+it; a future `LiveTradingService`, Phase 13, will too — callers depend on
+the interface, never the concrete paper class). One documented decision:
+an exit never re-runs the entry-oriented Risk Engine (including
+`KILL_SWITCH_ACTIVE`) — the kill switch stops *new* positions, never
+existing ones, and blocking a stop-loss during a kill switch would leave
+capital undefended, which defeats the point of both mechanisms. The
+execution engine's own slippage/balance checks still apply to every exit
+regardless, per spec's stop-loss requirement.
+
+29 new tests (15 `evaluatePositionExit`, 5 `computePositionPriceUpdate`, 5
+`sellPartial`, 7 `monitorPositionTick`, on top of the existing paper
+trading tests) — **163 tests pass across the whole monorepo.**
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -274,7 +324,7 @@ monorepo as of this phase.**
 - [x] Phase 6 — Paper Trading
 - [x] Phase 7 — Strategy Engine
 - [x] Phase 8 — Risk Engine
-- [ ] Phase 9 — TP / SL / Trailing Stop
+- [x] Phase 9 — TP / SL / Trailing Stop
 - [ ] Phase 10 — Dashboard
 - [ ] Phase 11 — Telegram
 - [ ] Phase 12 — Wallet Adapter

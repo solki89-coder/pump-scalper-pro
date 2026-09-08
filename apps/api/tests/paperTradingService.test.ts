@@ -48,6 +48,7 @@ const OPEN_PARAMS = {
   liquiditySol: 10,
   maxSlippageBps: 2000,
   stopLossPercent: 15,
+  stopLossMode: 'FIXED' as const,
   takeProfitLevels: [
     { triggerPercent: 10, sellPercent: 25 },
     { triggerPercent: 20, sellPercent: 25 },
@@ -168,5 +169,137 @@ describe('PaperTradingService.closePosition', () => {
 
     expect(closed.realizedPnlSol).toBeLessThan(0);
     expect(trade.pnlPercent).toBeLessThan(0);
+  });
+});
+
+describe('PaperTradingService.sellPartial', () => {
+  it('sells only the requested quantity, leaves the position OPEN with the remainder, and marks the TP level executed', async () => {
+    const engine = new PaperExecutionEngine();
+    const { positionsPort, tradesPort, trades } = fakeStores();
+    const service = new PaperTradingService(engine, positionsPort, tradesPort);
+
+    const { position: opened } = await service.openPosition({
+      ...OPEN_PARAMS,
+      takeProfitLevels: [
+        { triggerPercent: 10, sellPercent: 25 },
+        { triggerPercent: 20, sellPercent: 25 },
+      ],
+    });
+    const sellQty = opened.originalQuantity * 0.25;
+
+    const { position: after, trade } = await service.sellPartial({
+      positionId: opened.id,
+      quantity: sellQty,
+      levelIndex: 0,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol * 1.1,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'TAKE_PROFIT',
+    });
+
+    expect(after.status).toBe('OPEN');
+    expect(after.quantity).toBeCloseTo(opened.quantity - sellQty, 6);
+    expect(after.takeProfitLevels[0]?.executed).toBe(true);
+    expect(after.takeProfitLevels[1]?.executed).toBe(false);
+    expect(trade.side).toBe('SELL');
+    expect(trade.quantity).toBeCloseTo(sellQty, 6);
+    expect(trades).toHaveLength(2); // BUY + partial SELL
+  });
+
+  it('accumulates realizedPnlSol across multiple partial sells', async () => {
+    const engine = new PaperExecutionEngine();
+    const { positionsPort, tradesPort } = fakeStores();
+    const service = new PaperTradingService(engine, positionsPort, tradesPort);
+
+    const { position: opened } = await service.openPosition(OPEN_PARAMS);
+    const sellQty = opened.originalQuantity * 0.25;
+
+    const { position: afterFirst } = await service.sellPartial({
+      positionId: opened.id,
+      quantity: sellQty,
+      levelIndex: 0,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol * 1.1,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'TAKE_PROFIT',
+    });
+    const { position: afterSecond } = await service.sellPartial({
+      positionId: opened.id,
+      quantity: sellQty,
+      levelIndex: 1,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol * 1.2,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'TAKE_PROFIT',
+    });
+
+    expect(afterSecond.realizedPnlSol).toBeGreaterThan(afterFirst.realizedPnlSol);
+  });
+
+  it('closes the position outright once a partial sell exhausts the remaining quantity', async () => {
+    const engine = new PaperExecutionEngine();
+    const { positionsPort, tradesPort } = fakeStores();
+    const service = new PaperTradingService(engine, positionsPort, tradesPort);
+
+    const { position: opened } = await service.openPosition(OPEN_PARAMS);
+    const { position: after } = await service.sellPartial({
+      positionId: opened.id,
+      quantity: opened.quantity, // the entire remaining amount
+      levelIndex: null,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'TAKE_PROFIT',
+    });
+
+    expect(after.status).toBe('CLOSED');
+    expect(after.quantity).toBe(0);
+    expect(after.closedAt).not.toBeNull();
+  });
+
+  it('caps the sell at the remaining quantity rather than overselling', async () => {
+    const engine = new PaperExecutionEngine();
+    const { positionsPort, tradesPort } = fakeStores();
+    const service = new PaperTradingService(engine, positionsPort, tradesPort);
+
+    const { position: opened } = await service.openPosition(OPEN_PARAMS);
+    const { trade } = await service.sellPartial({
+      positionId: opened.id,
+      quantity: opened.quantity * 10, // absurdly oversized request
+      levelIndex: null,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'TAKE_PROFIT',
+    });
+
+    expect(trade.quantity).toBeCloseTo(opened.quantity, 6);
+  });
+
+  it('rejects a partial sell on an already-closed position', async () => {
+    const engine = new PaperExecutionEngine();
+    const { positionsPort, tradesPort } = fakeStores();
+    const service = new PaperTradingService(engine, positionsPort, tradesPort);
+
+    const { position: opened } = await service.openPosition(OPEN_PARAMS);
+    await service.closePosition({
+      positionId: opened.id,
+      currentPriceSol: OPEN_PARAMS.currentPriceSol,
+      liquiditySol: 10,
+      maxSlippageBps: 2000,
+      reason: 'MANUAL',
+    });
+
+    await expect(
+      service.sellPartial({
+        positionId: opened.id,
+        quantity: 1,
+        levelIndex: 0,
+        currentPriceSol: OPEN_PARAMS.currentPriceSol,
+        liquiditySol: 10,
+        maxSlippageBps: 2000,
+        reason: 'TAKE_PROFIT',
+      }),
+    ).rejects.toThrow('already closed');
   });
 });

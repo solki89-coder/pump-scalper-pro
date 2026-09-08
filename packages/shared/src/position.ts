@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TakeProfitLevelSchema } from './strategy.js';
+import { StopLossModeSchema, TakeProfitLevelSchema } from './strategy.js';
 
 export const TradingModeSchema = z.enum(['PAPER', 'LIVE']);
 export type TradingMode = z.infer<typeof TradingModeSchema>;
@@ -27,7 +27,10 @@ export const PositionSchema = z.object({
   entryPrice: z.number().positive(),
   currentPrice: z.number().nonnegative(),
   highestPrice: z.number().nonnegative(),
-  quantity: z.number().positive(),
+  /** Remaining, unsold quantity — reduced by each partial take-profit sell. */
+  quantity: z.number().nonnegative(),
+  /** The full quantity bought at entry, fixed for the position's lifetime. Take-profit sellPercent values are always relative to this, never to the shrinking `quantity`. */
+  originalQuantity: z.number().positive(),
 
   entryValueSol: z.number().positive(),
   currentValueSol: z.number().nonnegative(),
@@ -37,6 +40,7 @@ export const PositionSchema = z.object({
 
   stopLossPercent: z.number().positive(),
   stopLossPrice: z.number().positive(),
+  stopLossMode: StopLossModeSchema,
   takeProfitLevels: z.array(TakeProfitLevelStateSchema),
   trailingStopPercent: z.number().positive().nullable(),
   trailingStopPrice: z.number().positive().nullable(),

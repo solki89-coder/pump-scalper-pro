@@ -14,6 +14,7 @@ interface PositionRow {
   current_price: number;
   highest_price: number;
   quantity: number;
+  original_quantity: number;
   entry_value_sol: number;
   current_value_sol: number;
   unrealized_pnl_sol: number;
@@ -21,6 +22,7 @@ interface PositionRow {
   realized_pnl_sol: number;
   stop_loss_percent: number;
   stop_loss_price: number;
+  stop_loss_mode: Position['stopLossMode'];
   take_profit_levels: TakeProfitLevelState[];
   trailing_stop_percent: number | null;
   trailing_stop_price: number | null;
@@ -49,6 +51,7 @@ function mapPosition(row: PositionRow): Position {
     currentPrice: row.current_price,
     highestPrice: row.highest_price,
     quantity: row.quantity,
+    originalQuantity: row.original_quantity,
     entryValueSol: row.entry_value_sol,
     currentValueSol: row.current_value_sol,
     unrealizedPnlSol: row.unrealized_pnl_sol,
@@ -56,6 +59,7 @@ function mapPosition(row: PositionRow): Position {
     realizedPnlSol: row.realized_pnl_sol,
     stopLossPercent: row.stop_loss_percent,
     stopLossPrice: row.stop_loss_price,
+    stopLossMode: row.stop_loss_mode,
     takeProfitLevels: row.take_profit_levels,
     trailingStopPercent: row.trailing_stop_percent,
     trailingStopPrice: row.trailing_stop_price,
@@ -71,17 +75,17 @@ export async function createPosition(p: Omit<Position, 'id' | 'holdingTimeSecond
   const row = await queryOne<PositionRow>(
     `INSERT INTO positions (
        user_id, strategy_id, mode, status, mint, token_name, token_symbol,
-       entry_price, current_price, highest_price, quantity, entry_value_sol, current_value_sol,
+       entry_price, current_price, highest_price, quantity, original_quantity, entry_value_sol, current_value_sol,
        unrealized_pnl_sol, unrealized_pnl_percent, realized_pnl_sol,
-       stop_loss_percent, stop_loss_price, take_profit_levels, trailing_stop_percent, trailing_stop_price,
+       stop_loss_percent, stop_loss_price, stop_loss_mode, take_profit_levels, trailing_stop_percent, trailing_stop_price,
        entry_opportunity_score, entry_risk_score, entry_time, closed_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
      RETURNING *`,
     [
       p.userId, p.strategyId, p.mode, p.status, p.mint, p.tokenName, p.tokenSymbol,
-      p.entryPrice, p.currentPrice, p.highestPrice, p.quantity, p.entryValueSol, p.currentValueSol,
+      p.entryPrice, p.currentPrice, p.highestPrice, p.quantity, p.originalQuantity, p.entryValueSol, p.currentValueSol,
       p.unrealizedPnlSol, p.unrealizedPnlPercent, p.realizedPnlSol,
-      p.stopLossPercent, p.stopLossPrice, JSON.stringify(p.takeProfitLevels), p.trailingStopPercent, p.trailingStopPrice,
+      p.stopLossPercent, p.stopLossPrice, p.stopLossMode, JSON.stringify(p.takeProfitLevels), p.trailingStopPercent, p.trailingStopPrice,
       p.entryOpportunityScore, p.entryRiskScore, p.entryTime, p.closedAt,
     ],
   );
@@ -94,6 +98,7 @@ export async function updatePosition(
   patch: Partial<
     Pick<
       Position,
+      | 'quantity'
       | 'currentPrice'
       | 'highestPrice'
       | 'currentValueSol'
@@ -113,13 +118,14 @@ export async function updatePosition(
   const merged = { ...existing, ...patch };
   const row = await queryOne<PositionRow>(
     `UPDATE positions SET
-       current_price = $2, highest_price = $3, current_value_sol = $4,
-       unrealized_pnl_sol = $5, unrealized_pnl_percent = $6, realized_pnl_sol = $7,
-       stop_loss_price = $8, take_profit_levels = $9, trailing_stop_price = $10,
-       status = $11, closed_at = $12, updated_at = now()
+       quantity = $2, current_price = $3, highest_price = $4, current_value_sol = $5,
+       unrealized_pnl_sol = $6, unrealized_pnl_percent = $7, realized_pnl_sol = $8,
+       stop_loss_price = $9, take_profit_levels = $10, trailing_stop_price = $11,
+       status = $12, closed_at = $13, updated_at = now()
      WHERE id = $1 RETURNING *`,
     [
       id,
+      merged.quantity,
       merged.currentPrice,
       merged.highestPrice,
       merged.currentValueSol,

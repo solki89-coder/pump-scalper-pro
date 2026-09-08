@@ -62,6 +62,7 @@ describe('PaperTradingService against real Postgres', () => {
       liquiditySol: 10,
       maxSlippageBps: 2000,
       stopLossPercent: 15,
+      stopLossMode: 'FIXED',
       takeProfitLevels: [{ triggerPercent: 10, sellPercent: 50 }],
       trailingStopPercent: null,
       entryOpportunityScore: 90,
