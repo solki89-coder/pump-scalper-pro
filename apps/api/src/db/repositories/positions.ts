@@ -178,3 +178,12 @@ export async function sumOpenExposureSol(userId: string): Promise<number> {
   );
   return Number(rows[0]?.total ?? '0');
 }
+
+/** SOL actually committed to still-open positions (entry cost, not mark-to-market) — what a virtual/paper balance needs to subtract. */
+export async function sumOpenEntryValueSol(userId: string): Promise<number> {
+  const rows = await query<{ total: string | null }>(
+    `SELECT sum(entry_value_sol)::text AS total FROM positions WHERE user_id = $1 AND status = 'OPEN'`,
+    [userId],
+  );
+  return Number(rows[0]?.total ?? '0');
+}

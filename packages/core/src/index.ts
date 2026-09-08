@@ -7,3 +7,4 @@ export * from './strategy/ranking.js';
 export * from './risk/riskEngine.js';
 export * from './positions/positionEvaluator.js';
 export * from './positions/positionManager.js';
+export * from './analytics/pnlAnalytics.js';

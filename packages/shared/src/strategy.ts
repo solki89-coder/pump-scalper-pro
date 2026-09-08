@@ -15,8 +15,19 @@ const MinMax = z.object({
   max: z.number().nullable(),
 });
 
-export const StrategyConfigSchema = z
-  .object({
+function validateTakeProfitLevels(cfg: { takeProfitLevels: TakeProfitLevel[] }, ctx: z.RefinementCtx): void {
+  const total = cfg.takeProfitLevels.reduce((sum, l) => sum + l.sellPercent, 0);
+  if (total > 100) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `takeProfitLevels sellPercent sums to ${total}%, must be <= 100%`,
+      path: ['takeProfitLevels'],
+    });
+  }
+}
+
+/** The base object shape, without the cross-field take-profit refinement — usable with `.omit()`/`.pick()` (ZodEffects from `.superRefine()` below isn't). */
+export const StrategyConfigObjectSchema = z.object({
     id: z.string().uuid().optional(),
     userId: z.string().uuid(),
     name: z.string().min(1).max(100),
@@ -57,15 +68,15 @@ export const StrategyConfigSchema = z
 
     createdAt: z.string().datetime().optional(),
     updatedAt: z.string().datetime().optional(),
-  })
-  .superRefine((cfg, ctx) => {
-    const total = cfg.takeProfitLevels.reduce((sum, l) => sum + l.sellPercent, 0);
-    if (total > 100) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `takeProfitLevels sellPercent sums to ${total}%, must be <= 100%`,
-        path: ['takeProfitLevels'],
-      });
-    }
-  });
+});
+
+export const StrategyConfigSchema = StrategyConfigObjectSchema.superRefine(validateTakeProfitLevels);
 export type StrategyConfig = z.infer<typeof StrategyConfigSchema>;
+
+/** For API input validation: every field except id/userId/timestamps (server-assigned), with the same take-profit refinement. */
+export const StrategyConfigInputSchema = StrategyConfigObjectSchema.omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+}).superRefine(validateTakeProfitLevels);
