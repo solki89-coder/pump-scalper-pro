@@ -159,6 +159,34 @@ Two things worth knowing before trusting these numbers:
   data-source table above) resolves to a conservative, not neutral, value.
   A token DexScreener hasn't indexed yet scores low, not lucky.
 
+## Execution Engine & Paper Trading
+
+`ExecutionEngine` (`packages/core/src/execution/types.ts`) is the interface
+every trade — manual, strategy, or autonomous — goes through:
+`quoteBuy`/`quoteSell`/`executeBuy`/`executeSell`/`estimateFees`/`estimateSlippage`.
+Paper and live (Phase 13) both implement it, so trading logic never has to
+know which mode it's running in.
+
+`PaperExecutionEngine` — today's only implementation — simulates the full
+fill: a linear price-impact slippage model (`size / liquidity`, deliberately
+simple and documented as a heuristic — a bonding curve's real impact is
+convex, not linear), pump.fun's documented 1% platform fee plus a flat
+network-fee estimate, and jittered slippage within the quoted bound.
+**It never sends a transaction** — `txSignature` is always `null` in paper
+mode, per spec.
+
+`PaperTradingService` (`apps/api/src/trading/`) drives `openPosition()`/
+`closePosition()` through the execution engine and persists exactly through
+the Phase 2 `positions`/`trades` repositories, tagged `mode: 'PAPER'` —
+every paper trade is saved as if it were real, per spec. Multi-level
+take-profit / stop-loss / trailing-stop *decision* logic (when to trigger a
+sell, and for how much) is Phase 9; this phase provides the simulated
+execution + persistence those decisions will call into.
+
+Tested with 17 unit tests (11 for `PaperExecutionEngine`, 6 for
+`PaperTradingService` against fakes) plus 1 end-to-end integration test
+against real Postgres (open → close → verify both rows and PnL).
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -166,7 +194,7 @@ Two things worth knowing before trusting these numbers:
 - [x] Phase 3 — Solana connection
 - [x] Phase 4 — Real-time token scanner
 - [x] Phase 5 — Scoring Engine
-- [ ] Phase 6 — Paper Trading
+- [x] Phase 6 — Paper Trading
 - [ ] Phase 7 — Strategy Engine
 - [ ] Phase 8 — Risk Engine
 - [ ] Phase 9 — TP / SL / Trailing Stop
