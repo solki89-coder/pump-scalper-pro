@@ -1,0 +1,25 @@
+{
+  "name": "pump-scalper-pro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PUMP SCALPER PRO — Sniper + Scalping trading system for personal use on Solana/Pump.fun",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run typecheck",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "migrate": "npm run migrate --workspace apps/api"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
