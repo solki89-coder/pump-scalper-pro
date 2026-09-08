@@ -59,10 +59,41 @@ behind an adapter interface. This table is kept current every phase:
 | Holder count / distribution, creator holding % | **Not available from a free/no-key public API today.** The adapter interface (`HolderDataProvider`) is defined; the concrete implementation requires a paid indexer (e.g. Helius DAS, Birdeye) — wire your own key when you have one. Until then these fields are `null` and any score/rule that depends on them treats `null` as "unknown, do not assume safe". | Phase 4 |
 | Live trade execution / swap routing | Requires an on-chain DEX aggregator (e.g. Jupiter). Interface defined in `ExecutionEngine`; concrete live adapter ships in Phase 13, disabled by default. | Phase 13 |
 
+## Database
+
+Postgres schema, applied via a small built-in migration runner (no ORM —
+plain SQL migrations in `apps/api/src/db/migrations/`, tracked in a
+`schema_migrations` table).
+
+Tables required by spec: `users`, `strategies`, `tokens`, `signals`,
+`positions`, `trades`, `risk_events`, `system_events`, `wallets`.
+
+Two tables were added beyond that list because the product cannot persist
+its own operating state without them — documented here rather than added
+silently:
+- `risk_configs` — per-user Risk Engine limits (max position size, daily
+  loss, exposure, open positions, trades/day, slippage, min balance,
+  autonomous-mode limits). Phase 8 reads/writes this table; it has to live
+  somewhere durable.
+- `bot_state` — current bot status (`PAPER`/`READY`/`RUNNING`/`STOPPED`/
+  `KILL_SWITCH`), trading mode, active strategy, and kill-switch state, so
+  it survives an API restart instead of resetting to unknown.
+
+Run migrations:
+```bash
+npm run migrate --workspace apps/api
+```
+
+Every repository under `apps/api/src/db/repositories/` is covered by real
+integration tests (`apps/api/tests/db.integration.test.ts`) that run against
+an actual Postgres instance — no mocked SQL. See
+[Local Postgres/Redis for development](#local-postgresredis-for-development)
+to set that up.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
-- [ ] Phase 2 — Database
+- [x] Phase 2 — Database
 - [ ] Phase 3 — Solana connection
 - [ ] Phase 4 — Real-time token scanner
 - [ ] Phase 5 — Scoring Engine
@@ -85,9 +116,29 @@ npm run typecheck
 npm test
 ```
 
+`npm test` at the root runs the `@pump-scalper/shared` unit tests only,
+unless a Postgres test database is reachable — see below to also run the
+`apps/api` DB integration tests.
+
 There is no runnable server yet — that lands in Phase 3 onward. Full
 installation (MacBook, Docker, VPS), RPC/Telegram/wallet setup, and strategy
 configuration docs are added as those phases complete.
+
+### Local Postgres/Redis for development
+
+```bash
+# Debian/Ubuntu example — adjust for your OS, or use Docker (see Phase 15)
+sudo service postgresql start
+sudo service redis-server start
+sudo -u postgres psql -c "CREATE ROLE pump_scalper LOGIN PASSWORD 'pump_scalper';"
+sudo -u postgres createdb -O pump_scalper pump_scalper
+sudo -u postgres createdb -O pump_scalper pump_scalper_test   # used only by tests
+
+cp .env.example .env   # fill in DATABASE_URL etc.
+npm run migrate --workspace apps/api
+
+npm run test --workspace apps/api   # runs against pump_scalper_test automatically
+```
 
 ## License
 
