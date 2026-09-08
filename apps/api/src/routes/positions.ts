@@ -6,6 +6,7 @@ import { getRiskConfig } from '../db/repositories/riskConfig.js';
 import { getToken } from '../db/repositories/tokens.js';
 import { evaluateTrade } from '../risk/index.js';
 import { paperTradingService } from '../services.js';
+import { getTelegramAlerts } from '../telegram/index.js';
 import { getVirtualSolBalance } from '../trading/paperBalance.js';
 
 const TakeProfitLevelInput = z.object({ triggerPercent: z.number().positive(), sellPercent: z.number().positive().max(100) });
@@ -85,6 +86,7 @@ export default async function positionRoutes(fastify: FastifyInstance): Promise<
       entryOpportunityScore: null,
       entryRiskScore: null,
     });
+    void getTelegramAlerts().buyExecuted(position);
     return reply.code(201).send({ position, trade });
   });
 
@@ -110,6 +112,7 @@ export default async function positionRoutes(fastify: FastifyInstance): Promise<
       maxSlippageBps: parsed.data.maxSlippageBps,
       reason: 'MANUAL',
     });
+    void getTelegramAlerts().sellExecuted(closed, trade);
     return { position: closed, trade };
   });
 }

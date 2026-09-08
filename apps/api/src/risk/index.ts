@@ -3,6 +3,7 @@ import { getOrCreateBotState } from '../db/repositories/botState.js';
 import { countOpenPositions, sumOpenExposureSol } from '../db/repositories/positions.js';
 import { createRiskEvent } from '../db/repositories/riskEvents.js';
 import { countTradesToday, sumRealizedPnlSince } from '../db/repositories/trades.js';
+import { getTelegramAlerts } from '../telegram/index.js';
 import { evaluateTrade as evaluateTradeCore, type RiskGatePorts, type TradeRequest } from './riskGate.js';
 
 export { activateKillSwitch, deactivateKillSwitch } from './killSwitch.js';
@@ -18,6 +19,9 @@ const realPorts: RiskGatePorts = {
     await createRiskEvent(event);
   },
   isLiveTradingEnabled: () => loadConfig().ENABLE_LIVE_TRADING,
+  get alerts() {
+    return getTelegramAlerts();
+  },
 };
 
 /** Wires the real Postgres-backed ports into evaluateTrade(). */

@@ -358,6 +358,49 @@ and no body, which Fastify's default JSON parser rejects; the server's
 content-type parser was made lenient to accept `{}` for those instead of
 only patching the client.
 
+## Telegram Bot & the runtime loop
+
+`apps/api/src/telegram/` — all 11 spec commands (`/status /pnl /positions
+/tokens /start /stop /paper /live /risk /strategy /kill`) and all 11 alert
+types (`NEW_TOKEN BUY_SIGNAL BUY_EXECUTED SELL_EXECUTED TAKE_PROFIT
+STOP_LOSS TRAILING_STOP RISK_REJECT DAILY_LOSS_LIMIT KILL_SWITCH
+RPC_ERROR`). `/live` mirrors the API's own refusal — not implemented
+until Phase 13. Every command is gated to the configured `TELEGRAM_CHAT_ID`
+— the bot token alone is never sufficient to control trading. Command
+logic (`telegram/commands.ts`) is decoupled from grammy itself, so it's
+tested directly against real repositories, not by simulating Telegram
+updates.
+
+Alerts are wired at the single choke points that already exist for each
+event — the Risk Engine (`riskGate.ts`, covering RISK_REJECT and
+DAILY_LOSS_LIMIT for every caller: manual, autonomous, all of them), the
+kill switch route, the token scanner's discovery handler, the paper
+trading routes/position monitor (BUY_EXECUTED/SELL_EXECUTED, the latter's
+message body naming the exact exit reason — TAKE_PROFIT/STOP_LOSS/
+TRAILING_STOP/MAX_HOLDING_TIME/MANUAL), and the autonomous engine
+(BUY_SIGNAL ahead of the risk gate). `TELEGRAM_BOT_TOKEN` unset ⇒ every
+alert call is a no-op (`NoopTelegramAlerts`) — exactly "leave empty to
+disable", not a half-working integration.
+
+**This phase also closed a real gap**: through Phase 10, nothing actually
+*ran* the scanner, position monitoring, or autonomous engine outside of
+manual test scripts — `apps/api/src/server.ts`'s `main()` only ever
+answered HTTP requests. `apps/api/src/loop.ts` now starts, on boot: the
+token scanner, an `RpcHealthMonitor` (→ `RPC_ERROR` alert after 3
+consecutive failures), a position-monitoring poll (every 10s, every open
+position, every user — runs regardless of kill-switch/bot status, same
+reasoning as `positionMonitor.ts`), and an autonomous-trading poll (every
+15s, gated on `bot_state.status === 'RUNNING'`, same PAPER-only /
+kill-switch refusal as `runAutonomousCycle` itself). Verified booting for
+real: it starts cleanly, and when the sandbox's network policy blocked the
+Solana RPC host, the health monitor caught and logged it instead of
+crashing the process — the failure path was exercised for real, not just
+unit-tested.
+
+21 new tests (8 formatting, 6 command-integration against real Postgres,
+plus the existing suites unaffected by the alert wiring since it's all
+optional/no-op by default). **208 tests pass across the whole monorepo.**
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -370,6 +413,7 @@ only patching the client.
 - [x] Phase 8 — Risk Engine
 - [x] Phase 9 — TP / SL / Trailing Stop
 - [x] Phase 10 — Dashboard (reduced scope — see above)
+- [x] Phase 11 — Telegram
 - [ ] Phase 11 — Telegram
 - [ ] Phase 12 — Wallet Adapter
 - [ ] Phase 13 — Live Execution Adapter

@@ -1,5 +1,6 @@
 import { evaluateSignal, rankCandidates, scoreToken, type RankableCandidate } from '@pump-scalper/core';
 import type { Position, RiskCheckResult, RiskConfig, StrategyConfig, TokenScores, TokenSnapshot, Trade } from '@pump-scalper/shared';
+import type { TelegramAlertsPort } from '../telegram/alerts.js';
 import type { TradeRequest } from '../risk/riskGate.js';
 
 export interface AutonomousCycleInput {
@@ -22,6 +23,8 @@ export interface AutonomousCyclePorts {
     snapshot: TokenSnapshot,
     scores: TokenScores,
   ): Promise<{ position: Position; trade: Trade }>;
+  /** Optional — omitted in most tests via fakePorts(); alert calls become no-ops when absent. */
+  alerts?: TelegramAlertsPort;
 }
 
 export interface AutonomousCycleResult {
@@ -107,11 +110,17 @@ export async function runAutonomousCycle(
       );
 
       if (!riskResult.approved) {
+        // RISK_REJECT / DAILY_LOSS_LIMIT alerts fire once, centrally, from
+        // evaluateTrade() itself (apps/api/src/risk/riskGate.ts) — it's the
+        // one place that has the actual computed daily-loss figure, and it
+        // covers every caller (manual buys included), not just this one.
         result.rejectedByRisk.push({ mint: snapshot.mint, reasons: riskResult.reasons });
         continue;
       }
 
-      await ports.openPaperPosition(strategy, snapshot, scores);
+      void ports.alerts?.buySignal(snapshot.mint, candidate.signal as 'BUY' | 'STRONG_BUY', scores.opportunityScore, scores.riskScore);
+      const { position } = await ports.openPaperPosition(strategy, snapshot, scores);
+      void ports.alerts?.buyExecuted(position);
       result.opened.push({ mint: snapshot.mint, strategyId: strategy.id ?? null });
     }
   }

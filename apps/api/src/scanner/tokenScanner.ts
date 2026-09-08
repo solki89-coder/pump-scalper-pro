@@ -1,5 +1,6 @@
 import type { TokenCreationEvent, MarketData } from '@pump-scalper/solana';
 import type { TokenSnapshot } from '@pump-scalper/shared';
+import { NoopTelegramAlerts, type TelegramAlertsPort } from '../telegram/alerts.js';
 
 export interface TokenRepositoryPort {
   upsertToken(snapshot: TokenSnapshot): Promise<TokenSnapshot>;
@@ -47,6 +48,7 @@ export class TokenScanner {
     private readonly repo: TokenRepositoryPort,
     private readonly logger: ScannerLogger = console,
     private readonly enrichIntervalMs = 15_000,
+    private readonly alerts: TelegramAlertsPort = new NoopTelegramAlerts(),
   ) {}
 
   start(): void {
@@ -94,6 +96,7 @@ export class TokenScanner {
     };
     await this.repo.upsertToken(snapshot);
     this.watch(event.mint);
+    void this.alerts.newToken(snapshot);
   }
 
   async enrichPending(): Promise<void> {

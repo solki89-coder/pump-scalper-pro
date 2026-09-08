@@ -3,6 +3,7 @@ import { loadConfig } from '../config.js';
 import { getOrCreateBotState, updateBotState } from '../db/repositories/botState.js';
 import { createSystemEvent } from '../db/repositories/systemEvents.js';
 import { activateKillSwitch, deactivateKillSwitch } from '../risk/killSwitch.js';
+import { getTelegramAlerts } from '../telegram/index.js';
 
 export default async function botRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/bot/status', { preHandler: fastify.authenticate }, async (request) => {
@@ -40,11 +41,15 @@ export default async function botRoutes(fastify: FastifyInstance): Promise<void>
   });
 
   fastify.post('/api/bot/kill', { preHandler: fastify.authenticate }, async (request) => {
-    return activateKillSwitch(request.userId, 'Manual activation from dashboard/API');
+    const state = await activateKillSwitch(request.userId, 'Manual activation from dashboard/API');
+    void getTelegramAlerts().killSwitch(true, state.killSwitchReason);
+    return state;
   });
 
   fastify.post('/api/bot/kill/deactivate', { preHandler: fastify.authenticate }, async (request) => {
-    return deactivateKillSwitch(request.userId);
+    const state = await deactivateKillSwitch(request.userId);
+    void getTelegramAlerts().killSwitch(false, null);
+    return state;
   });
 
   fastify.get('/api/config/live-trading-enabled', { preHandler: fastify.authenticate }, async () => {

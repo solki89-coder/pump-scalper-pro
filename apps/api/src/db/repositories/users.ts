@@ -49,3 +49,8 @@ export async function countUsers(): Promise<number> {
   const rows = await query<{ count: string }>(`SELECT count(*)::text AS count FROM users`);
   return Number(rows[0]?.count ?? '0');
 }
+
+export async function listUsers(): Promise<User[]> {
+  const rows = await query<UserRow>(`SELECT * FROM users ORDER BY created_at`);
+  return rows.map(mapUser);
+}

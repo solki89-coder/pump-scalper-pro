@@ -64,6 +64,29 @@ async function main(): Promise<void> {
   const fastify = await buildServer();
   const { ensureAdminUser } = await import('./auth/bootstrap.js');
   await ensureAdminUser(fastify.log);
+
+  const { startRuntimeLoop } = await import('./loop.js');
+  const runtimeLoop = startRuntimeLoop(fastify.log);
+
+  const { createTelegramBot } = await import('./telegram/index.js');
+  const telegramBot = createTelegramBot();
+  if (telegramBot) {
+    fastify.log.info('Starting Telegram bot (long polling)');
+    void telegramBot.start({ onStart: () => fastify.log.info('Telegram bot ready') });
+  } else {
+    fastify.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — Telegram integration disabled.');
+  }
+
+  const shutdown = async () => {
+    fastify.log.info('Shutting down...');
+    await runtimeLoop.stop();
+    if (telegramBot) await telegramBot.stop();
+    await fastify.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
+
   await fastify.listen({ port: config.API_PORT, host: '0.0.0.0' });
 }
 

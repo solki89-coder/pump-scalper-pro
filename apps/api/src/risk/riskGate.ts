@@ -1,5 +1,6 @@
 import { checkTrade, type RiskCheckInput } from '@pump-scalper/core';
 import type { RiskCheckResult, RiskConfig, TradingMode } from '@pump-scalper/shared';
+import type { TelegramAlertsPort } from '../telegram/alerts.js';
 
 export interface RiskGatePorts {
   getBotState(userId: string): Promise<{ killSwitchActive: boolean }>;
@@ -16,6 +17,8 @@ export interface RiskGatePorts {
     details: Record<string, unknown>;
   }): Promise<void>;
   isLiveTradingEnabled(): boolean;
+  /** Optional — omitted in unit tests via fakePorts(); alert calls become no-ops when absent. */
+  alerts?: TelegramAlertsPort;
 }
 
 export interface TradeRequest {
@@ -81,6 +84,10 @@ export async function evaluateTrade(
       attemptedSizeSol: request.sizeSol,
       details: { mode: request.mode, isAutonomous: request.isAutonomous },
     });
+    void ports.alerts?.riskReject(request.mint, request.sizeSol, result);
+    if (result.reasons.includes('MAX_DAILY_LOSS') || result.reasons.includes('AUTONOMOUS_MAX_DAILY_LOSS')) {
+      void ports.alerts?.dailyLossLimit(input.realizedDailyLossSol, riskConfig.maxDailyLossSol);
+    }
   }
 
   return result;

@@ -1,5 +1,6 @@
 import { computePositionPriceUpdate, evaluatePositionExit } from '@pump-scalper/core';
 import type { Position } from '@pump-scalper/shared';
+import { NoopTelegramAlerts, type TelegramAlertsPort } from '../telegram/alerts.js';
 import type { TradingService } from './tradingService.js';
 
 export interface PositionsUpdatePort {
@@ -52,6 +53,7 @@ export async function monitorPositionTick(
   positionsPort: PositionsUpdatePort,
   tradingService: TradingService,
   logger: MonitorLogger = console,
+  alerts: TelegramAlertsPort = new NoopTelegramAlerts(),
 ): Promise<void> {
   if (position.status === 'CLOSED') return;
 
@@ -70,35 +72,21 @@ export async function monitorPositionTick(
       case 'NONE':
         return;
       case 'STOP_LOSS':
-        await tradingService.closePosition({
-          positionId: current.id,
-          currentPriceSol,
-          liquiditySol,
-          maxSlippageBps,
-          reason: 'STOP_LOSS',
-        });
-        return;
       case 'TRAILING_STOP':
-        await tradingService.closePosition({
+      case 'MAX_HOLDING_TIME': {
+        const { position: closed, trade } = await tradingService.closePosition({
           positionId: current.id,
           currentPriceSol,
           liquiditySol,
           maxSlippageBps,
-          reason: 'TRAILING_STOP',
+          reason: decision.type,
         });
+        void alerts.sellExecuted(closed, trade);
         return;
-      case 'MAX_HOLDING_TIME':
-        await tradingService.closePosition({
-          positionId: current.id,
-          currentPriceSol,
-          liquiditySol,
-          maxSlippageBps,
-          reason: 'MAX_HOLDING_TIME',
-        });
-        return;
+      }
       case 'TAKE_PROFIT': {
         const sellQuantity = current.originalQuantity * (decision.level.sellPercent / 100);
-        await tradingService.sellPartial({
+        const { position: afterSell, trade } = await tradingService.sellPartial({
           positionId: current.id,
           quantity: sellQuantity,
           levelIndex: decision.levelIndex,
@@ -107,6 +95,7 @@ export async function monitorPositionTick(
           maxSlippageBps,
           reason: 'TAKE_PROFIT',
         });
+        void alerts.sellExecuted(afterSell, trade);
         return;
       }
     }

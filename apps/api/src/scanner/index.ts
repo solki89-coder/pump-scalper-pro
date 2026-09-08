@@ -3,6 +3,7 @@ import pino from 'pino';
 import { loadConfig } from '../config.js';
 import { getToken, upsertToken } from '../db/repositories/tokens.js';
 import { getConnection } from '../solana.js';
+import { getTelegramAlerts } from '../telegram/index.js';
 import { TokenScanner } from './tokenScanner.js';
 
 export { TokenScanner } from './tokenScanner.js';
@@ -20,5 +21,7 @@ export function createTokenScanner(): TokenScanner {
     market,
     { upsertToken, getToken },
     { info: (m) => logger.info(m), error: (m, err) => logger.error({ err }, m) },
+    15_000,
+    getTelegramAlerts(),
   );
 }
