@@ -34,6 +34,13 @@ const EnvSchema = z.object({
   SOLANA_RPC_URL: z.string().url(),
   SOLANA_WS_URL: z.string().url(),
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),
+  // Jupiter's aggregator routes pump.fun (bonding-curve and post-graduation
+  // PumpSwap/Raydium) trades, confirmed via their own integration
+  // announcements — used as the live swap backend instead of hand-rolling
+  // pump.fun's own (unverified) instruction format. Base URL is
+  // configurable because Jupiter has changed it before (quote-api.jup.ag ->
+  // lite-api.jup.ag); verify against https://dev.jup.ag before going live.
+  JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag/swap/v1'),
 
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),

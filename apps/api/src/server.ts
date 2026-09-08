@@ -7,6 +7,7 @@ import securityPlugin from './plugins/security.js';
 import analyticsRoutes from './routes/analytics.js';
 import authRoutes from './routes/auth.js';
 import botRoutes from './routes/bot.js';
+import executionRoutes from './routes/execution.js';
 import healthRoutes from './routes/health.js';
 import portfolioRoutes from './routes/portfolio.js';
 import positionRoutes from './routes/positions.js';
@@ -48,6 +49,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(botRoutes);
   await fastify.register(portfolioRoutes);
   await fastify.register(positionRoutes);
+  await fastify.register(executionRoutes);
   await fastify.register(strategyRoutes);
   await fastify.register(riskRoutes);
   await fastify.register(tradeRoutes);

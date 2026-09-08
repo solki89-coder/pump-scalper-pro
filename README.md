@@ -442,6 +442,63 @@ a real Phantom extension is present. The actual approve-in-Phantom flow
 needs a real browser + extension to verify beyond that; do so before
 relying on this for anything Phase 13 wires up.
 
+## Live Execution Adapter
+
+**Scope decision, made explicitly with the user before building this
+phase: manual LIVE trades only, signed by the user's own connected
+Phantom wallet. Autonomous trading never goes LIVE** — there is no way to
+get per-trade human approval on an unattended loop, and pretending
+otherwise (e.g. a server-held signing key for the autonomous engine) was
+rejected as a materially different, riskier trust model than everything
+else in this codebase. `runAutonomousCycle` still refuses outright in
+LIVE mode (Phase 8); nothing in this phase changes that.
+
+**Why Jupiter, not pump.fun's own instructions**: building a live buy/sell
+against pump.fun's bonding curve directly would mean hand-decoding their
+(unofficial, unverified) instruction format — exactly the gap
+`packages/solana/src/adapters/pumpfunEventDecoder.ts` documents and
+refuses to fill with a guess. Verified instead (via search, since this
+sandbox couldn't fetch Jupiter's docs directly) that Jupiter's aggregator
+routes pump.fun trades directly, bonding-curve phase included, per their
+own integration announcements — so `JupiterSwapAdapter`
+(`apps/api/src/execution/`) uses Jupiter's public quote/swap API as the
+execution backend for both pre- and post-graduation tokens, without this
+project inventing pump.fun's wire format itself. `JUPITER_API_BASE` is
+configurable and flagged for verification against dev.jup.ag before real
+use — Jupiter has changed their public endpoint before.
+
+**The flow is two calls, not one**, because signing has to happen in the
+browser:
+1. `POST /api/execution/quote` — risk-gated (same `evaluateTrade()` every
+   other trade goes through; `mode: 'LIVE'` requires `ENABLE_LIVE_TRADING=true`,
+   checked here independently of `bot_state.mode`), returns a Jupiter
+   quote plus an **unsigned** transaction for the connected wallet to sign
+   via `useWalletAdapter()` (Phase 12).
+2. `POST /api/execution/confirm` — called after the browser has signed and
+   broadcast it. **Never trusts the request body for price, quantity, or
+   fees** — `SolanaTransactionVerifier` reads the actual confirmed
+   transaction's balance changes (`preBalances`/`postBalances`,
+   `pre`/`postTokenBalances`) and only records a `Position`/`Trade`
+   (`mode: 'LIVE'`) from what verifiably happened on-chain. A missing,
+   unconfirmed, or failed transaction is refused (`TransactionNotConfirmedError`,
+   HTTP 409), not silently recorded from what the client claims occurred.
+
+**What's not built**: no frontend UI wires this flow together yet (no
+"Buy Live" button) — consistent with the Phase 10 scope note, the reduced
+dashboard has no manual-buy UI for PAPER either. The backend capability is
+real, complete, and tested; a trading UI on top of it is future work.
+
+**Test coverage, and its honest limit**: `JupiterSwapAdapter`,
+`SolanaTransactionVerifier`, and `LiveTradeRecorder` are fully unit-tested
+(26 tests) against fakes — no live network in the suite. The routes
+themselves are tested for the parts that don't require live network
+(auth, `ENABLE_LIVE_TRADING=false` refusal, validation) — 4 tests. The
+actual quote/confirm success paths call real Jupiter + Solana RPC inline
+in the route handlers and were **not** exercised end-to-end in this
+sandboxed environment (mainnet RPC is blocked here, same as Phase 4/11's
+scanner) — verify with a real RPC endpoint, `ENABLE_LIVE_TRADING=true`,
+and a small real balance before trusting this with meaningful funds.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
@@ -456,6 +513,7 @@ relying on this for anything Phase 13 wires up.
 - [x] Phase 10 — Dashboard (reduced scope — see above)
 - [x] Phase 11 — Telegram
 - [x] Phase 12 — Wallet Adapter
+- [x] Phase 13 — Live Execution Adapter (manual-only — see above)
 - [ ] Phase 11 — Telegram
 - [ ] Phase 12 — Wallet Adapter
 - [ ] Phase 13 — Live Execution Adapter
