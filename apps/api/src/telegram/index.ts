@@ -1,23 +1,19 @@
-import { loadConfig } from '../config.js';
-import { NoopTelegramAlerts, TelegramAlerts, type TelegramAlertsPort } from './alerts.js';
-import { createTelegramBot } from './bot.js';
+import type { TelegramAlertsPort } from './alerts.js';
+import { telegramBotManager } from './manager.js';
 
 export { createTelegramBot, resolveOperatorUserId } from './bot.js';
 export * as telegramCommands from './commands.js';
 export * from './alerts.js';
 export * as telegramFormatting from './formatting.js';
+export { telegramBotManager, TelegramBotManager, type TelegramRuntimeConfig, type TelegramBotStatus } from './manager.js';
+export { testTelegramConnection, type TelegramTestResult } from './telegramApiClient.js';
 
-let alertsSingleton: TelegramAlertsPort | undefined;
-
-/** The shared alerts sender every trading code path uses — a real Bot-backed sender when configured, a no-op otherwise. */
+/**
+ * The shared alerts sender every trading code path uses — delegates to
+ * `telegramBotManager`, which owns the actual bot instance and is
+ * reconfigured live when Telegram settings change in the dashboard
+ * (routes/settings.ts), without a server restart.
+ */
 export function getTelegramAlerts(): TelegramAlertsPort {
-  if (alertsSingleton) return alertsSingleton;
-  const config = loadConfig();
-  const bot = createTelegramBot();
-  if (!bot || !config.TELEGRAM_CHAT_ID) {
-    alertsSingleton = new NoopTelegramAlerts();
-  } else {
-    alertsSingleton = new TelegramAlerts(bot.api, config.TELEGRAM_CHAT_ID);
-  }
-  return alertsSingleton;
+  return telegramBotManager.getAlerts();
 }

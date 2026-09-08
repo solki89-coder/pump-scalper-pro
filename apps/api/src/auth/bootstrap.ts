@@ -2,6 +2,7 @@ import { loadConfig } from '../config.js';
 import { countUsers, createUser } from '../db/repositories/users.js';
 import { getOrCreateBotState } from '../db/repositories/botState.js';
 import { upsertRiskConfig } from '../db/repositories/riskConfig.js';
+import { upsertTelegramConfig } from '../db/repositories/telegramConfig.js';
 import { hashPassword } from './passwords.js';
 
 /**
@@ -46,5 +47,16 @@ export async function ensureAdminUser(logger: MinimalLogger): Promise<void> {
     autonomousMaxTrades: null,
     tradingAllocationSol: config.TRADING_ALLOCATION_SOL,
   });
+
+  // Telegram settings became dashboard-editable (Settings page,
+  // routes/settings.ts) rather than env-var-only — seed the DB row from
+  // TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID here (once, on first boot) purely
+  // so an existing docker-compose .env keeps working out of the box
+  // without a trip through the UI. From here on the DB row is the source
+  // of truth; changing the env vars after this does nothing.
+  if (config.TELEGRAM_BOT_TOKEN && config.TELEGRAM_CHAT_ID) {
+    await upsertTelegramConfig(user.id, { botToken: config.TELEGRAM_BOT_TOKEN, chatId: config.TELEGRAM_CHAT_ID, enabled: true });
+  }
+
   logger.info(`Seeded admin user ${user.email} from ADMIN_EMAIL/ADMIN_PASSWORD.`);
 }

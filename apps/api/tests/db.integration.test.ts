@@ -6,6 +6,7 @@ import { createUser } from '../src/db/repositories/users.js';
 import { upsertWallet, getWallet } from '../src/db/repositories/wallets.js';
 import { getRiskConfig, upsertRiskConfig } from '../src/db/repositories/riskConfig.js';
 import { getOrCreateBotState, updateBotState } from '../src/db/repositories/botState.js';
+import { getTelegramConfig, upsertTelegramConfig } from '../src/db/repositories/telegramConfig.js';
 import { createStrategy, listStrategies, updateStrategy } from '../src/db/repositories/strategies.js';
 import { upsertToken, getToken } from '../src/db/repositories/tokens.js';
 import { createSignal, listSignalsForMint } from '../src/db/repositories/signals.js';
@@ -101,7 +102,7 @@ const baseSnapshot = (mint: string): TokenSnapshot => ({
 });
 
 describe('migrations', () => {
-  it('creates every table required by the spec plus the two documented additions', async () => {
+  it('creates every table required by the spec plus the documented additions', async () => {
     const rows = await query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
     );
@@ -116,6 +117,7 @@ describe('migrations', () => {
         'signals',
         'strategies',
         'system_events',
+        'telegram_configs',
         'tokens',
         'trades',
         'users',
@@ -179,6 +181,19 @@ describe('users + wallets + risk config + bot state repositories', () => {
     expect(initial.killSwitchActive).toBe(false);
     const updated = await updateBotState(user.id, { status: 'RUNNING', mode: 'PAPER' });
     expect(updated.status).toBe('RUNNING');
+  });
+
+  it('round-trips a Telegram config, preserving the stored token when a later save omits it', async () => {
+    const user = await makeUser();
+    expect(await getTelegramConfig(user.id)).toBeNull();
+
+    const created = await upsertTelegramConfig(user.id, { botToken: 'tok-1', chatId: 'chat-1', enabled: true });
+    expect(created).toMatchObject({ botToken: 'tok-1', chatId: 'chat-1', enabled: true });
+
+    // Omitting botToken (the settings route never gets the real token
+    // back from the client after first save) must not blank it out.
+    const updated = await upsertTelegramConfig(user.id, { chatId: 'chat-2', enabled: false });
+    expect(updated).toMatchObject({ botToken: 'tok-1', chatId: 'chat-2', enabled: false });
   });
 });
 

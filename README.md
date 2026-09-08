@@ -69,7 +69,7 @@ plain SQL migrations in `apps/api/src/db/migrations/`, tracked in a
 Tables required by spec: `users`, `strategies`, `tokens`, `signals`,
 `positions`, `trades`, `risk_events`, `system_events`, `wallets`.
 
-Two tables were added beyond that list because the product cannot persist
+Three tables were added beyond that list because the product cannot persist
 its own operating state without them — documented here rather than added
 silently:
 - `risk_configs` — per-user Risk Engine limits (max position size, daily
@@ -79,6 +79,11 @@ silently:
 - `bot_state` — current bot status (`PAPER`/`READY`/`RUNNING`/`STOPPED`/
   `KILL_SWITCH`), trading mode, active strategy, and kill-switch state, so
   it survives an API restart instead of resetting to unknown.
+- `telegram_configs` — bot token/chat id/enabled flag, one row per
+  operator. Originally env-var-only (`TELEGRAM_BOT_TOKEN`/
+  `TELEGRAM_CHAT_ID`); made dashboard-editable post-launch (Settings
+  page) so reconfiguring Telegram doesn't require touching `.env` and
+  restarting the container — see "Telegram Bot" below.
 
 Run migrations:
 ```bash
@@ -364,8 +369,10 @@ only patching the client.
 /tokens /start /stop /paper /live /risk /strategy /kill`) and all 11 alert
 types (`NEW_TOKEN BUY_SIGNAL BUY_EXECUTED SELL_EXECUTED TAKE_PROFIT
 STOP_LOSS TRAILING_STOP RISK_REJECT DAILY_LOSS_LIMIT KILL_SWITCH
-RPC_ERROR`). `/live` mirrors the API's own refusal — not implemented
-until Phase 13. Every command is gated to the configured `TELEGRAM_CHAT_ID`
+RPC_ERROR`). `/live` explains that autonomous live trading isn't offered
+by this system (Phase 13's manual-only scope decision) and that manual
+live trades require signing in the dashboard, not Telegram. Every command
+is gated to the configured `TELEGRAM_CHAT_ID`
 — the bot token alone is never sufficient to control trading. Command
 logic (`telegram/commands.ts`) is decoupled from grammy itself, so it's
 tested directly against real repositories, not by simulating Telegram
@@ -400,6 +407,59 @@ unit-tested.
 21 new tests (8 formatting, 6 command-integration against real Postgres,
 plus the existing suites unaffected by the alert wiring since it's all
 optional/no-op by default). **208 tests pass across the whole monorepo.**
+
+### Telegram settings became dashboard-editable (post-launch)
+
+`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` started as env-var-only — set them,
+restart the container. That's a real friction point for a setting an
+operator legitimately wants to change without redeploying, so it moved to
+a `telegram_configs` DB table (one row per operator, migration `0004`) and
+a Settings page (`/settings` in the dashboard, `apps/web/src/app/settings/page.tsx`):
+
+- **`TelegramBotManager`** (`apps/api/src/telegram/manager.ts`) now owns
+  the single running bot instance and the shared alerts sender. Saving new
+  settings calls `configure()`, which stops whatever bot was running and
+  starts the new one **immediately — no server restart**. `createTelegramBot`
+  was refactored to take the token/chat id as explicit parameters instead
+  of reading env config directly, so the same function works for both the
+  original env-var boot path and this dynamic one.
+- **`GET/PUT /api/settings/telegram`**: the read model
+  (`hasToken`/`enabled`/`running`/`chatId`) never echoes the actual bot
+  token back to the browser — editing chat id or the enabled flag without
+  retyping the token works via `PUT`'s optional `botToken` (omit it, the
+  stored one is kept; the repository's `upsertTelegramConfig` uses
+  `COALESCE` for exactly this). Enabling with no token ever stored is
+  refused with a clear 400, not a silently-broken bot.
+- **`POST /api/settings/telegram/test`**: a "Test Connection" button that
+  calls Telegram's `getMe` (validates the token) then sends a real message
+  to the chat id (validates that specific value) — two calls, not one, so
+  "token is fine but the chat id is wrong" is a different, more
+  diagnosable result than "token is invalid." A network-level failure
+  (unreachable, non-JSON response) returns a clean `{ok:false, error}`
+  instead of throwing into a generic 500 — found and fixed via this
+  sandbox's own blocked network access to `api.telegram.org`, which is a
+  real (if unusual) way to exercise that failure path.
+- Env vars didn't disappear: `ensureAdminUser` still seeds the DB row from
+  `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` on first boot if they're set, so
+  an existing docker-compose `.env` setup keeps working with no trip
+  through the UI required. From then on the DB row is authoritative;
+  changing the env vars afterward does nothing (documented in the
+  migration's own comment, not left as a surprise).
+
+Verified two ways: 17 new backend tests (repository round-trip, the
+manager's start/stop/reconfigure logic against a fake bot factory — real
+`bot.start()` calls `getMe()` over the network, so tests inject a fake
+rather than hitting Telegram — the API client against a fake fetch, and
+route-level integration tests against real Postgres), and a full
+Playwright browser pass: login → Settings via the dashboard nav link →
+save token+chat id+enabled → confirmation banner → reload confirms the
+token placeholder never re-shows the real value while chat id/running
+status persisted → disable → back to dashboard. That same browser pass is
+what caught the `testTelegramConnection` 500-on-network-failure bug above
+— the sandbox's blocked egress to Telegram's API turned out to be a
+useful, free "does this degrade gracefully" test.
+
+**254 tests pass across the whole monorepo.**
 
 ## Wallet Adapter (Phantom)
 

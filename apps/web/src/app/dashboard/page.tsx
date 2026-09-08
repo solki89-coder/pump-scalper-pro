@@ -97,19 +97,24 @@ export default function DashboardPage() {
             <span className="text-xs text-muted">{botState.mode} mode</span>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            // Client JS cannot clear an httpOnly cookie itself — the
-            // server's /auth/logout does that. Navigate regardless of
-            // whether the call succeeds; a stale cookie with no valid
-            // session is harmless, but a user stuck on a page that
-            // silently failed to sign them out is not.
-            void apiFetch('/auth/logout', { method: 'POST' }).finally(() => router.push('/login'));
-          }}
-        >
-          Sign out
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => router.push('/settings')}>
+            Settings
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              // Client JS cannot clear an httpOnly cookie itself — the
+              // server's /auth/logout does that. Navigate regardless of
+              // whether the call succeeds; a stale cookie with no valid
+              // session is harmless, but a user stuck on a page that
+              // silently failed to sign them out is not.
+              void apiFetch('/auth/logout', { method: 'POST' }).finally(() => router.push('/login'));
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
       </header>
 
       <div className="mb-4">

@@ -14,21 +14,24 @@ export async function resolveOperatorUserId(): Promise<string | null> {
 }
 
 /**
- * Returns null when TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID aren't set — the
- * spec's "leave empty to disable Telegram integration entirely". Every
- * command is gated to the configured chat id: the bot token alone must
- * never be sufficient to control trading — anyone who discovers the token
- * (or messages the bot before you configure a chat id) must not be able
- * to issue commands.
+ * Takes the token/chat id explicitly rather than reading env config
+ * directly, so it works both for the original env-var-only setup and for
+ * the dashboard-editable settings TelegramBotManager reconfigures at
+ * runtime (routes/settings.ts) — this function itself doesn't care where
+ * the values came from. Returns null when either is empty, matching the
+ * original "leave empty to disable Telegram integration entirely".
+ * Every command is gated to the configured chat id: the bot token alone
+ * must never be sufficient to control trading — anyone who discovers the
+ * token (or messages the bot before a chat id is configured) must not be
+ * able to issue commands.
  */
-export function createTelegramBot(): Bot | null {
-  const config = loadConfig();
-  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) return null;
+export function createTelegramBot(botToken: string, chatId: string): Bot | null {
+  if (!botToken || !chatId) return null;
 
-  const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
+  const bot = new Bot(botToken);
 
   bot.use(async (ctx, next) => {
-    if (String(ctx.chat?.id) !== config.TELEGRAM_CHAT_ID) return;
+    if (String(ctx.chat?.id) !== chatId) return;
     await next();
   });
 

@@ -27,6 +27,7 @@ export const SystemEventTypeSchema = z.enum([
   'WALLET_DISCONNECTED',
   'AUTH_LOGIN',
   'AUTH_LOGIN_FAILED',
+  'TELEGRAM_SETTINGS_UPDATED',
 ]);
 export type SystemEventType = z.infer<typeof SystemEventTypeSchema>;
 

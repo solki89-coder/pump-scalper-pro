@@ -9,4 +9,5 @@ export * from './events.js';
 export * from './wallet.js';
 export * from './botStatus.js';
 export * from './analytics.js';
+export * from './telegramSettings.js';
 export * from './ws.js';

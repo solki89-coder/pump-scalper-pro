@@ -13,6 +13,7 @@ import healthRoutes from './routes/health.js';
 import portfolioRoutes from './routes/portfolio.js';
 import positionRoutes from './routes/positions.js';
 import riskRoutes from './routes/risk.js';
+import settingsRoutes from './routes/settings.js';
 import strategyRoutes from './routes/strategies.js';
 import tokenRoutes from './routes/tokens.js';
 import tradeRoutes from './routes/trades.js';
@@ -90,6 +91,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await fastify.register(executionRoutes);
   await fastify.register(strategyRoutes);
   await fastify.register(riskRoutes);
+  await fastify.register(settingsRoutes);
   await fastify.register(tradeRoutes);
   await fastify.register(analyticsRoutes);
   await fastify.register(tokenRoutes);
@@ -108,19 +110,26 @@ async function main(): Promise<void> {
   const { startRuntimeLoop } = await import('./loop.js');
   const runtimeLoop = startRuntimeLoop(fastify.log);
 
-  const { createTelegramBot } = await import('./telegram/index.js');
-  const telegramBot = createTelegramBot();
-  if (telegramBot) {
+  // Telegram settings are dashboard-editable (Settings page,
+  // routes/settings.ts) and applied live via telegramBotManager — this
+  // is only the *initial* load from whatever's stored in the DB for the
+  // operator account (seeded from TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID on
+  // first boot by ensureAdminUser, if those env vars were set).
+  const { resolveOperatorUserId, telegramBotManager } = await import('./telegram/index.js');
+  const { getTelegramConfig } = await import('./db/repositories/telegramConfig.js');
+  const operatorUserId = await resolveOperatorUserId();
+  const telegramConfig = operatorUserId ? await getTelegramConfig(operatorUserId) : null;
+  if (telegramConfig?.enabled && telegramConfig.botToken && telegramConfig.chatId) {
     fastify.log.info('Starting Telegram bot (long polling)');
-    void telegramBot.start({ onStart: () => fastify.log.info('Telegram bot ready') });
+    await telegramBotManager.configure({ botToken: telegramConfig.botToken, chatId: telegramConfig.chatId });
   } else {
-    fastify.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — Telegram integration disabled.');
+    fastify.log.warn('Telegram is not configured or not enabled — set it up from the dashboard Settings page.');
   }
 
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
     await runtimeLoop.stop();
-    if (telegramBot) await telegramBot.stop();
+    await telegramBotManager.stop();
     await fastify.close();
     process.exit(0);
   };
