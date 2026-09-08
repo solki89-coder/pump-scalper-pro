@@ -1,0 +1,79 @@
+# PUMP SCALPER PRO — Docker Compose stack (Postgres, Redis, API, Dashboard).
+#
+# `docker compose up -d --build` reads a `.env` file in this directory
+# both ways: docker compose itself uses it to fill in the ${...}
+# placeholders below, and the `api` service's `env_file:` passes the same
+# file into the container as its own environment (the app's own
+# apps/api/src/config.ts loads it too when run outside Docker — same
+# file, two consumers). Copy .env.example to .env and fill it in first;
+# see the README's "Production Deployment (Docker Compose)" section.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pump_scalper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pump_scalper}
+      POSTGRES_DB: ${POSTGRES_DB:-pump_scalper}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-pump_scalper} -d ${POSTGRES_DB:-pump_scalper}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever DATABASE_URL/REDIS_URL a .env copied from
+      # .env.example might carry (those point at `localhost`, which
+      # inside this container means the container itself, not the
+      # `postgres`/`redis` services) — these two are always compose
+      # network hostnames, never user-configured.
+      DATABASE_URL: postgres://${POSTGRES_USER:-pump_scalper}:${POSTGRES_PASSWORD:-pump_scalper}@postgres:5432/${POSTGRES_DB:-pump_scalper}
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    ports:
+      - '${API_PORT:-4000}:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the client bundle at build time (see apps/web/Dockerfile) —
+        # must be reachable from the *browser*, not just from inside the
+        # compose network, so it's your real host/domain + API_PORT, not
+        # the `api` service name.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    restart: unless-stopped
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:

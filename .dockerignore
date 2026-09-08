@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.git
+.env
+.env.local
+apps/web/.next
+**/.next
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+**/coverage

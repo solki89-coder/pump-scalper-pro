@@ -635,7 +635,7 @@ network-independent) or is listed as accepted with the reasoning for why.
   This is a *dev-only* tool vulnerability, exploitable only when Vitest's
   `--ui` server is actively running; grepped every `package.json` script
   in the monorepo — `--ui` is never used. The fix is `vitest@5`, a major
-  version bump across every workspace's test suite (231 tests); given the
+  version bump across every workspace's test suite (235 tests); given the
   vulnerability requires a mode this project never enables, upgrading
   wasn't worth the regression risk it would introduce right before a
   security-focused phase. Worth revisiting on its own, deliberately, not
@@ -674,9 +674,9 @@ frontend-touching phase in this project was held to.
 - [x] Phase 12 — Wallet Adapter
 - [x] Phase 13 — Live Execution Adapter (manual-only — see above)
 - [x] Phase 14 — Security Audit (see above)
-- [ ] Phase 15 — Production Deployment
+- [x] Phase 15 — Production Deployment (see below)
 
-## Getting started (current state)
+## Getting started — local development
 
 ```bash
 npm install
@@ -688,14 +688,10 @@ npm test
 unless a Postgres test database is reachable — see below to also run the
 `apps/api` DB integration tests.
 
-There is no runnable server yet — that lands in Phase 3 onward. Full
-installation (MacBook, Docker, VPS), RPC/Telegram/wallet setup, and strategy
-configuration docs are added as those phases complete.
-
 ### Local Postgres/Redis for development
 
 ```bash
-# Debian/Ubuntu example — adjust for your OS, or use Docker (see Phase 15)
+# Debian/Ubuntu example — adjust for your OS, or use Docker Compose instead (see below)
 sudo service postgresql start
 sudo service redis-server start
 sudo -u postgres psql -c "CREATE ROLE pump_scalper LOGIN PASSWORD 'pump_scalper';"
@@ -721,6 +717,93 @@ Sign in at `/login` with the seeded `ADMIN_EMAIL`/`ADMIN_PASSWORD`. A brand
 new account has no risk configuration yet — `PUT /api/risk-config` (no UI
 for this yet, see the Dashboard scope note above) needs to be called at
 least once before a manual buy will pass the Risk Engine.
+
+## Production Deployment (Phase 15)
+
+Docker Compose runs the whole stack — Postgres, Redis, the API, and the
+dashboard — as four containers on one machine (a VPS, or a MacBook for a
+persistent home setup). This is a single-instance deployment by design:
+nothing here is built for horizontal scaling, which matches a
+single-operator personal trading tool.
+
+```bash
+cp .env.example .env
+# Fill in at minimum: SOLANA_RPC_URL, SOLANA_WS_URL, JWT_SECRET (32+ random
+# bytes — `openssl rand -hex 32`), ADMIN_EMAIL, ADMIN_PASSWORD. Leave
+# ENABLE_LIVE_TRADING=false until you've verified paper trading end to end.
+# Optionally set NEXT_PUBLIC_API_URL (defaults to http://localhost:4000 —
+# override it to your real host/domain if the dashboard will be reached
+# from anywhere other than the same machine) and CORS_ORIGIN if the
+# dashboard is served from a different origin than the API.
+
+docker compose up -d --build
+
+# First boot only, or after pulling new migrations: the api container
+# already runs `npm run migrate` before starting itself on every
+# container start (idempotent — see apps/api/src/db/migrate.ts), so
+# there's no separate migration step to remember.
+
+docker compose logs -f api    # watch it seed the admin user and come up
+```
+
+The dashboard is then at `http://<host>:3000` (`WEB_PORT` in `.env` to
+change the port) and the API at `http://<host>:4000` (`API_PORT`). Put a
+reverse proxy (Caddy, nginx, Traefik) with a real TLS certificate in front
+of both for anything reachable outside `localhost` — this compose file
+does not set one up, since the right choice (and domain/cert setup)
+depends entirely on your own DNS and hosting, which isn't something to
+guess at generically.
+
+**What's in `docker-compose.yml`**: `postgres:16-alpine` and
+`redis:7-alpine` with named volumes (data survives `docker compose down`;
+use `down -v` to actually wipe it) and healthchecks the `api` container
+waits on before starting; `api` builds from `apps/api/Dockerfile` and runs
+migrate-then-start on every container start; `web` builds from
+`apps/web/Dockerfile`, with `NEXT_PUBLIC_API_URL` passed as a build
+argument (Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle at
+*build* time, not read from the container's runtime environment — change
+that value and you need `docker compose up -d --build`, not just a
+restart, for it to take effect).
+
+**Image size, honestly**: neither Dockerfile is a trimmed multi-stage
+build. The API workspace has no compiled-JS build step — it runs under
+`tsx` in production the same way it does in dev — so its image genuinely
+needs devDependencies (`tsx`, `typescript`) at runtime, not just to build;
+`npm ci --omit=dev` isn't an option there. The web image *could* use
+Next.js's `output: 'standalone'` mode to ship a much smaller runtime
+image, but this workspace imports sibling monorepo packages
+(`@pump-scalper/shared`, `@pump-scalper/solana`) and verifying that
+standalone's file-tracing resolves those correctly across npm workspace
+symlinks was out of scope for this pass — documented as a real
+optimization opportunity rather than silently left undone.
+
+**What was and wasn't verified**: `docker compose config` (the resolved
+config, env-var substitution included) was checked for correctness; the
+exact `COPY` set each Dockerfile uses was tested standalone with a real
+`npm ci` (confirms nothing needed is missing from the layer); `next build`
+and `next start` were run directly and confirmed working (the same
+commands the web image's build and `CMD` use); `npm run migrate` /
+`npm run start` for the API were exercised directly in earlier phases.
+What was **not** verified is a real end-to-end `docker compose up --build`
+of the full stack — this sandboxed environment's network policy blocks
+Docker Hub image pulls (`node:20-alpine`, `postgres:16-alpine`,
+`redis:7-alpine` all fail to pull here), the same kind of sandbox
+restriction that blocked live Solana RPC access in earlier phases. Run
+`docker compose up -d --build` yourself and watch `docker compose logs
+-f` on first deploy before trusting it unattended.
+
+### VPS notes
+
+- Open only the ports you actually need publicly (typically 80/443 for a
+  reverse proxy in front of the dashboard) — don't expose Postgres (5432)
+  or Redis (6379) beyond the Docker network; this compose file doesn't
+  publish their ports to the host at all by default.
+- Back up the `postgres_data` volume (`docker run --rm -v
+  pump-scalper-pro_postgres_data:/data -v $(pwd):/backup alpine tar czf
+  /backup/pg-backup.tar.gz /data`, or your platform's volume snapshot
+  feature) — trade history and PnL live only there.
+- Keep `.env` off any machine or repo you don't control; it holds
+  `JWT_SECRET`, `ADMIN_PASSWORD`, and (if you use it) `TELEGRAM_BOT_TOKEN`.
 
 ## License
 
