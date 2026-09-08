@@ -54,9 +54,10 @@ behind an adapter interface. This table is kept current every phase:
 
 | Data | Source | Status |
 |---|---|---|
-| New token creation, bonding-curve state | Solana RPC `logsSubscribe`/`getAccountInfo` against the public Pump.fun program | Phase 4 |
-| Liquidity, volume, buys/sells, price | DexScreener public API (`api.dexscreener.com`, no key required) | Phase 4 |
-| Holder count / distribution, creator holding % | **Not available from a free/no-key public API today.** The adapter interface (`HolderDataProvider`) is defined; the concrete implementation requires a paid indexer (e.g. Helius DAS, Birdeye) — wire your own key when you have one. Until then these fields are `null` and any score/rule that depends on them treats `null` as "unknown, do not assume safe". | Phase 4 |
+| New token creation (mint, creator, block time) | Solana RPC `logsSubscribe` against the public Pump.fun program (`6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`, confirmed via Solscan) — detects the Anchor `Instruction: Create` log line, then reads the confirmed transaction's `postTokenBalances` for the new mint and the fee payer as creator. Both are generically derivable from any Solana transaction; no pump.fun-specific IDL needed. | **Done (Phase 4)** |
+| Token name, symbol, price, liquidity, volume, buy/sell counts | DexScreener public API (`GET /latest/dex/tokens/{mint}`, `api.dexscreener.com`, no key required, 300 req/min) — confirmed against docs.dexscreener.com. USD-denominated fields are converted to SOL using `priceNative/priceUsd` as the implied rate; liquidity is read directly from `liquidity.quote` (already SOL for SOL-quoted pairs). New tokens carry an explicit `PENDING_METADATA` sentinel until DexScreener indexes the pair (typically within seconds to a couple of minutes of first trade) — never a guessed name. | **Done (Phase 4)** |
+| Bonding-curve reserves, exact market cap pre-graduation, name/symbol straight from the `Create` instruction | Requires decoding pump.fun's own (unofficial) Anchor IDL for the `Create` instruction/`CreateEvent`. Deliberately **not implemented** — see `PumpFunEventDecoder` in `packages/solana/src/adapters/pumpfunEventDecoder.ts` for why guessing the byte layout was rejected, and how to plug in a verified decoder yourself. | Adapter interface defined, not implemented |
+| Unique buyer/seller wallet counts, holder count, distribution, creator holding % | **Not available from a free/no-key public API.** DexScreener gives buy/sell *transaction* counts (used for `buys5m`/`sells5m`) but not unique wallets or holder distribution. Getting these needs a paid indexer (Helius DAS, Birdeye, etc.) — these fields stay `null` until you wire one in, and any score/rule that depends on them treats `null` as "unknown, do not assume safe." | Not available; fields are `null` |
 | Live trade execution / swap routing | Requires an on-chain DEX aggregator (e.g. Jupiter). Interface defined in `ExecutionEngine`; concrete live adapter ships in Phase 13, disabled by default. | Phase 13 |
 
 ## Database
@@ -109,12 +110,38 @@ to set that up.
 - `ReadOnlyWalletReader` — the backend's *only* wallet capability: SOL and
   SPL token balance lookups from a public key, no signing, no keys held.
 
+## Real-time token scanner
+
+`TokenScanner` (`apps/api/src/scanner/`) wires three pieces together:
+1. `PumpFunTokenDiscovery` (packages/solana) — on-chain, real-time.
+2. `DexScreenerAdapter` (packages/solana) — periodic enrichment sweep
+   (every 15s by default) over mints still pending full metadata.
+3. The `tokens` repository (Phase 2) — every discovery and every
+   enrichment update is upserted immediately, so the `tokens` table is
+   always the current best-known state.
+
+Try it against live mainnet (needs a real `SOLANA_RPC_URL`/`SOLANA_WS_URL`
+and a migrated database):
+```bash
+npx tsx apps/api/src/scanner/run.ts
+```
+This prints nothing until pump.fun has an actual new launch — the public
+RPC endpoint in `.env.example` is heavily rate-limited; a dedicated
+provider is recommended for anything beyond a quick smoke test. This
+script has not been run against live mainnet traffic in this environment
+(no assumption is being made that it has) — the discovery and enrichment
+logic themselves are covered by 18 unit tests against realistic fixtures
+(fake RPC log streams, fake DexScreener responses: 5 for the pump.fun
+adapter, 8 for the DexScreener adapter, 5 for the TokenScanner
+orchestrator), so correctness doesn't depend on catching a real launch
+during a test run.
+
 ## Development Order
 
 - [x] Phase 1 — Project architecture
 - [x] Phase 2 — Database
 - [x] Phase 3 — Solana connection
-- [ ] Phase 4 — Real-time token scanner
+- [x] Phase 4 — Real-time token scanner
 - [ ] Phase 5 — Scoring Engine
 - [ ] Phase 6 — Paper Trading
 - [ ] Phase 7 — Strategy Engine
